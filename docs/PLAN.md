@@ -285,6 +285,8 @@ Keep the doc's existing standard: every factual claim sourced, and nothing claim
 
 | Milestone | Scope |
 |---|---|
-| 1 — 31 Jan 2027 | Real Blend V2 strategy on testnet (supply/withdraw via Blend `submit`, value via `b_rate`); loss reporting at strategy level with pro-rata shortfall accounting; cover expiry and streaming premium from vault yield; property tests |
-| 2 — 28 Feb 2027 | Multiple Blend markets with curator allocation limits; keeper-based TTL maintenance; USDC vault and pool; STRIDE threat model and monitoring; audit engaged, scope frozen |
-| 3 — 31 Mar 2027 | Audit remediation; multisig + timelock; mainnet deployment; first live covered vault with staked capacity; SDK and docs |
+| 1 — 31 Jan 2027 | Real Blend V2 strategy on testnet (supply/withdraw via Blend `submit`, value via `b_rate`); loss reporting at strategy level with pro-rata shortfall accounting; staker notice period; cover expiry and streaming premium from vault yield; property tests |
+| 2 — 28 Feb 2027 | Multiple Blend markets with curator allocation limits; open-source keeper for TTL maintenance; USDC vault and pool; STRIDE threat model and monitoring plan; contracts feature-frozen and tagged for audit |
+| 3 — 31 Mar 2027 | Audit remediation; multisig + timelock + `migrate()`; mainnet deployment; a covered vault live on mainnet operated by the team; SDK and docs |
+
+**Rule (founders, 25 September 2026): the milestones are a technical roadmap.** The grant checks implementation, not go-to-market. No deliverable or completion test may depend on a partner, an external curator, third-party stake or a customer. A "live vault" means deployed on mainnet and exercised by the team.

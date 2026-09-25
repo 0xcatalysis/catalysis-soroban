@@ -144,7 +144,7 @@ Scheduled for the grant milestones, per [`docs/ARCHITECTURE.md`](docs/ARCHITECTU
 
 - **Milestone 1, 31 Jan 2027:** a real Blend V2 strategy on testnet valued through `b_rate`; loss reporting with pro-rata shortfall accounting and a staker notice period; cover expiry and streaming premium from vault yield; property tests
 - **Milestone 2, 28 Feb 2027:** multiple Blend markets with curator allocation limits; keeper-driven TTL maintenance; USDC vault and pool; STRIDE threat model and monitoring plan; audit engaged
-- **Milestone 3, 31 Mar 2027:** audit remediation; multisig and timelock; mainnet; the first live covered vault; SDK and docs
+- **Milestone 3, 31 Mar 2027:** audit remediation; multisig and timelock; mainnet; a covered vault live on mainnet, operated by the team; SDK and docs
 
 Oracle-derived triggers and a DeFindex strategy are specified in the architecture doc but follow mainnet.
 

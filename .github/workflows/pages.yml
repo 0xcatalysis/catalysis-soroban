@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - docs/ARCHITECTURE.md
+      - docs/assets/**
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -39,6 +40,13 @@ jobs:
             hard_wrap: false
           CFG
           { printf -- '---\nlayout: default\ntitle: Technical Architecture\n---\n\n'; cat docs/ARCHITECTURE.md; } > site/index.md
+          mkdir -p site/_includes
+          cp docs/assets/favicon.svg docs/assets/favicon-32.png docs/assets/apple-touch-icon.png site/
+          cat > site/_includes/head-custom.html <<'HEAD'
+          <link rel="icon" type="image/svg+xml" href="{{ "/favicon.svg" | relative_url }}">
+          <link rel="alternate icon" type="image/png" sizes="32x32" href="{{ "/favicon-32.png" | relative_url }}">
+          <link rel="apple-touch-icon" sizes="180x180" href="{{ "/apple-touch-icon.png" | relative_url }}">
+          HEAD
 
       - uses: actions/configure-pages@v5
 

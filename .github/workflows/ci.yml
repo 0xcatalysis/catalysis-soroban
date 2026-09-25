@@ -30,10 +30,13 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # soroban-sdk 28 refuses a plain `cargo build` for contracts; it must be
+      # built through the Stellar CLI, which also strips the spec.
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v28.0.0
+
       - name: Build contracts (wasm32v1-none)
-        run: >
-          cargo build --release --target wasm32v1-none
-          -p cover-pool
+        run: stellar contract build
 
       - name: Contract sizes
         run: ls -l target/wasm32v1-none/release/*.wasm

@@ -193,7 +193,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 **Task 1 — Delete** ✅ done 25 September 2026 — `policy`, `blend_adapter` and `mock_blend_pool`, and the old Blend-policy integration test. Update the workspace members, the `integration-tests` dev-dependencies, and the interfaces in `common` (keep the Blend types). Update the WASM build step in `.github/workflows/ci.yml`, which names the contract crates explicitly, to `cover-pool`, `covered-vault` and `mock-strategy` (add the last two as their crates land).
 - This comes first so that every later task can end with the whole workspace green. Changing the pool API while `policy` still calls the old interface would leave the workspace broken until the rewrite.
 
-**Task 2 — CoverPool API change** (section 4.1). Update its unit tests.
+**Task 2 — CoverPool API change** (section 4.1). ✅ done 25 September 2026. Update its unit tests.
 - Must include a test that three sequential partial claims reduce `remaining` and slash stakers correctly.
 
 **Task 3 — MockStrategy** (section 4.3), with unit tests.

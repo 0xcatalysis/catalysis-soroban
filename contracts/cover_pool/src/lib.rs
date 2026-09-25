@@ -1,10 +1,12 @@
-//! CoverPool — a staked capital pool that underwrites coverage.
+//! CoverPool — a staked capital pool that insures covered vaults.
 //!
-//! Stakers deposit a Stellar asset (XLM for the MVP) and receive shares. The
-//! Policy contract reserves pool capital behind each policy it issues. When a
-//! policy pays out, the payout is taken from pool capital and every staker is
-//! slashed pro rata through the share value; nobody's share count changes.
-//! Premium is distributed to stakers through a per-share accumulator.
+//! Stakers deposit a Stellar asset (XLM for the MVP) and receive shares. A
+//! whitelisted CoveredVault opens cover on itself, paying a premium set by the
+//! pool, and later claims against that cover, in as many partial claims as it
+//! has withdrawals with a shortfall. Each claim is taken from pool capital, so
+//! every staker is slashed pro rata through the share value; nobody's share
+//! count changes. Premium is distributed to stakers through a per-share
+//! accumulator.
 //!
 //! Pools are fully collateralised: coverage written can never exceed capital,
 //! and capital backing live coverage cannot be withdrawn.
@@ -18,6 +20,8 @@ use soroban_sdk::{
 
 /// Fixed-point scale for the premium-per-share accumulator.
 const SCALE: i128 = 1_000_000_000_000_000_000; // 1e18
+/// Basis-point denominator.
+const BPS: i128 = 10_000;
 
 /// Persistent-entry TTL maintenance (ledgers). ~30 days at 5s ledgers.
 const TTL_THRESHOLD: u32 = 17_280 * 15;
@@ -35,6 +39,8 @@ pub struct PoolConfig {
     pub asset: Address,
     /// Minimum stake duration before withdrawal, in ledgers.
     pub lock_ledgers: u32,
+    /// Premium charged when cover is opened, in basis points of the limit.
+    pub premium_bps: u32,
 }
 
 #[contracttype]
@@ -43,7 +49,7 @@ pub struct PoolState {
     /// Asset units backing all shares.
     pub total_capital: i128,
     pub total_shares: i128,
-    /// Sum of reserved policy limits.
+    /// Sum of every vault's remaining cover.
     pub coverage_written: i128,
     /// Cumulative premium per share, scaled by 1e18.
     pub premium_index: i128,
@@ -60,11 +66,13 @@ pub struct Position {
     pub locked_until: u32,
 }
 
+/// A vault's cover. `remaining` is what can still be claimed; `claimed` is
+/// the running total already paid out.
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Reservation {
-    pub limit: i128,
-    pub beneficiary: Address,
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Cover {
+    pub remaining: i128,
+    pub claimed: i128,
 }
 
 /// What a staker's position is worth right now.
@@ -82,9 +90,10 @@ pub struct PositionView {
 enum DataKey {
     Config,
     State,
-    PolicyContract,
+    /// Whitelisted vault. Instance storage: the set is small and admin-managed.
+    Vault(Address),
     Position(Address),
-    Reservation(u64),
+    Cover(Address),
 }
 
 #[contracterror]
@@ -92,15 +101,15 @@ enum DataKey {
 #[repr(u32)]
 pub enum Error {
     NotInitialized = 1,
-    PolicyContractAlreadySet = 2,
+    NotWhitelisted = 2,
     InvalidAmount = 3,
     InsufficientCapacity = 4,
     StillLocked = 5,
     InsufficientShares = 6,
     CapitalBackingCoverage = 7,
-    UnknownReservation = 8,
-    PayoutExceedsLimit = 9,
-    ReservationExists = 10,
+    NoCover = 8,
+    ClaimExceedsCover = 9,
+    VaultAlreadyAdded = 10,
 }
 
 // ---------------------------------------------------------------------------
@@ -124,34 +133,34 @@ pub struct Unstaked {
 }
 
 #[contractevent]
-pub struct CoverageReserved {
+pub struct VaultAdded {
     #[topic]
-    pub policy_id: u64,
-    pub limit: i128,
+    pub vault: Address,
 }
 
 #[contractevent]
-pub struct CoverageReleased {
+pub struct CoverOpened {
     #[topic]
-    pub policy_id: u64,
+    pub vault: Address,
     pub limit: i128,
+    pub premium: i128,
+    pub remaining_after: i128,
 }
 
 #[contractevent]
-pub struct PremiumAccrued {
+pub struct CoverClosed {
     #[topic]
-    pub policy_id: u64,
-    pub amount: i128,
+    pub vault: Address,
+    pub released: i128,
 }
 
-/// Emitted when a payout slashes the pool.
+/// Emitted when a claim slashes the pool.
 #[contractevent]
 pub struct Slashed {
     #[topic]
-    pub policy_id: u64,
-    #[topic]
-    pub beneficiary: Address,
-    pub payout: i128,
+    pub vault: Address,
+    pub amount: i128,
+    pub remaining_after: i128,
     pub total_capital_after: i128,
 }
 
@@ -164,13 +173,20 @@ pub struct CoverPool;
 
 #[contractimpl]
 impl CoverPool {
-    pub fn __constructor(env: Env, admin: Address, asset: Address, lock_ledgers: u32) {
+    pub fn __constructor(
+        env: Env,
+        admin: Address,
+        asset: Address,
+        lock_ledgers: u32,
+        premium_bps: u32,
+    ) {
         env.storage().instance().set(
             &DataKey::Config,
             &PoolConfig {
                 admin,
                 asset,
                 lock_ledgers,
+                premium_bps,
             },
         );
         env.storage()
@@ -178,17 +194,16 @@ impl CoverPool {
             .set(&DataKey::State, &PoolState::default());
     }
 
-    /// One-time wiring of the Policy contract, the only address allowed to
-    /// reserve, release, accrue premium on or settle against this pool.
-    pub fn set_policy_contract(env: Env, policy_contract: Address) {
-        let cfg = config(&env);
-        cfg.admin.require_auth();
-        if env.storage().instance().has(&DataKey::PolicyContract) {
-            panic_with_error!(&env, Error::PolicyContractAlreadySet);
+    /// Whitelists a CoveredVault. Only whitelisted vaults can open cover on
+    /// this pool. Admin only.
+    pub fn add_vault(env: Env, vault: Address) {
+        config(&env).admin.require_auth();
+        let key = DataKey::Vault(vault.clone());
+        if env.storage().instance().has(&key) {
+            panic_with_error!(&env, Error::VaultAlreadyAdded);
         }
-        env.storage()
-            .instance()
-            .set(&DataKey::PolicyContract, &policy_contract);
+        env.storage().instance().set(&key, &true);
+        VaultAdded { vault }.publish(&env);
     }
 
     // ----- staking ---------------------------------------------------------
@@ -295,109 +310,113 @@ impl CoverPool {
         amount
     }
 
-    // ----- policy-facing ---------------------------------------------------
+    // ----- vault-facing ----------------------------------------------------
 
+    /// Capital not yet committed to any vault's cover.
     pub fn available_capacity(env: Env) -> i128 {
         let st = state(&env);
         st.total_capital - st.coverage_written
     }
 
-    /// Reserves `limit` of capital behind a policy. The beneficiary is fixed
-    /// here, so no later call can redirect a payout.
-    pub fn reserve(env: Env, policy_id: u64, limit: i128, beneficiary: Address) {
-        require_policy_contract(&env);
+    /// Reserves `limit` of pool capital for `vault` and charges the premium
+    /// (`limit * premium_bps / 10_000`) from `payer`, crediting it to stakers.
+    /// Calling again for the same vault adds to its remaining cover. Returns
+    /// the premium charged.
+    ///
+    /// The vault is the caller; its authorization is implicit on the direct
+    /// call. `payer` authorizes the premium transfer through the token.
+    pub fn open_cover(env: Env, vault: Address, payer: Address, limit: i128) -> i128 {
+        require_vault(&env, &vault);
         if limit <= 0 {
             panic_with_error!(&env, Error::InvalidAmount);
         }
-        let key = DataKey::Reservation(policy_id);
-        if env.storage().persistent().has(&key) {
-            panic_with_error!(&env, Error::ReservationExists);
-        }
+        let cfg = config(&env);
         let mut st = state(&env);
         if st.coverage_written + limit > st.total_capital {
             panic_with_error!(&env, Error::InsufficientCapacity);
         }
-        st.coverage_written += limit;
-        env.storage()
-            .persistent()
-            .set(&key, &Reservation { limit, beneficiary });
-        bump(&env, &key);
-        save_state(&env, &st);
-        CoverageReserved { policy_id, limit }.publish(&env);
-    }
 
-    /// Returns a policy's reserved capital to the pool.
-    pub fn release(env: Env, policy_id: u64) {
-        require_policy_contract(&env);
-        let res = reservation(&env, policy_id);
-        let mut st = state(&env);
-        st.coverage_written -= res.limit;
-        env.storage()
-            .persistent()
-            .remove(&DataKey::Reservation(policy_id));
+        let premium = limit * cfg.premium_bps as i128 / BPS;
+        if premium > 0 {
+            token::Client::new(&env, &cfg.asset).transfer(
+                &payer,
+                env.current_contract_address(),
+                &premium,
+            );
+            // total_capital > 0 here, so shares exist to credit.
+            st.premium_index += premium * SCALE / st.total_shares;
+            st.premiums_paid += premium;
+        }
+
+        let mut cover = cover(&env, &vault);
+        cover.remaining += limit;
+        st.coverage_written += limit;
+        save_cover(&env, &vault, &cover);
         save_state(&env, &st);
-        CoverageReleased {
-            policy_id,
-            limit: res.limit,
+        CoverOpened {
+            vault,
+            limit,
+            premium,
+            remaining_after: cover.remaining,
         }
         .publish(&env);
+        premium
     }
 
-    /// Pulls premium from `from` and credits it to stakers pro rata.
-    pub fn accrue_premium(env: Env, policy_id: u64, from: Address, amount: i128) {
-        require_policy_contract(&env);
+    /// Pays `amount` of the vault's remaining cover to the vault. This is the
+    /// slashing moment: capital leaves the pool and every staker's share
+    /// value falls pro rata. Three writes regardless of staker count: pool
+    /// state, the cover entry, and the token balances. Returns the amount.
+    pub fn claim(env: Env, vault: Address, amount: i128) -> i128 {
+        require_vault(&env, &vault);
         if amount <= 0 {
             panic_with_error!(&env, Error::InvalidAmount);
         }
         let cfg = config(&env);
-        let mut st = state(&env);
-        token::Client::new(&env, &cfg.asset).transfer(
-            &from,
-            env.current_contract_address(),
-            &amount,
-        );
-        st.premium_index += amount * SCALE / st.total_shares;
-        st.premiums_paid += amount;
-        save_state(&env, &st);
-        PremiumAccrued { policy_id, amount }.publish(&env);
-    }
-
-    /// Pays `payout` to the beneficiary recorded at reservation and slashes
-    /// every staker pro rata. Three writes regardless of staker count: pool
-    /// state, and the pool's and beneficiary's token balances.
-    pub fn settle_claim(env: Env, policy_id: u64, payout: i128) -> i128 {
-        require_policy_contract(&env);
-        let cfg = config(&env);
-        let res = reservation(&env, policy_id);
-        if payout <= 0 {
-            panic_with_error!(&env, Error::InvalidAmount);
+        let mut cover = cover(&env, &vault);
+        if cover.remaining == 0 {
+            panic_with_error!(&env, Error::NoCover);
         }
-        if payout > res.limit {
-            panic_with_error!(&env, Error::PayoutExceedsLimit);
+        if amount > cover.remaining {
+            panic_with_error!(&env, Error::ClaimExceedsCover);
         }
 
         let mut st = state(&env);
-        st.total_capital -= payout; // share value falls for every staker
-        st.coverage_written -= res.limit;
-        st.claims_paid += payout;
-        env.storage()
-            .persistent()
-            .remove(&DataKey::Reservation(policy_id));
+        st.total_capital -= amount; // share value falls for every staker
+        st.coverage_written -= amount;
+        st.claims_paid += amount;
+        cover.remaining -= amount;
+        cover.claimed += amount;
+        save_cover(&env, &vault, &cover);
         save_state(&env, &st);
 
         token::Client::new(&env, &cfg.asset).transfer(
             &env.current_contract_address(),
-            &res.beneficiary,
-            &payout,
+            &vault,
+            &amount,
         );
         Slashed {
-            policy_id,
-            beneficiary: res.beneficiary,
-            payout,
+            vault,
+            amount,
+            remaining_after: cover.remaining,
             total_capital_after: st.total_capital,
         }
         .publish(&env);
-        payout
+        amount
+    }
+
+    /// Releases whatever of the vault's cover remains unclaimed. The claimed
+    /// total is kept for the record.
+    pub fn close_cover(env: Env, vault: Address) {
+        require_vault(&env, &vault);
+        let mut cover = cover(&env, &vault);
+        let released = cover.remaining;
+        let mut st = state(&env);
+        st.coverage_written -= released;
+        cover.remaining = 0;
+        save_cover(&env, &vault, &cover);
+        save_state(&env, &st);
+        CoverClosed { vault, released }.publish(&env);
     }
 
     // ----- views -----------------------------------------------------------
@@ -427,8 +446,13 @@ impl CoverPool {
         }
     }
 
-    pub fn reservation(env: Env, policy_id: u64) -> Reservation {
-        reservation(&env, policy_id)
+    /// A vault's cover. Zero for a vault that never opened any.
+    pub fn cover(env: Env, vault: Address) -> Cover {
+        cover(&env, &vault)
+    }
+
+    pub fn is_vault(env: Env, vault: Address) -> bool {
+        env.storage().instance().has(&DataKey::Vault(vault))
     }
 
     /// Value of one share, scaled by 1e7 (1.0 = 10_000_000).
@@ -480,13 +504,13 @@ fn save_state(env: &Env, st: &PoolState) {
         .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 }
 
-fn require_policy_contract(env: &Env) {
-    let policy: Address = env
-        .storage()
-        .instance()
-        .get(&DataKey::PolicyContract)
-        .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized));
-    policy.require_auth();
+/// The vault must have signed (implicit when it is the direct invoker) and be
+/// whitelisted.
+fn require_vault(env: &Env, vault: &Address) {
+    vault.require_auth();
+    if !env.storage().instance().has(&DataKey::Vault(vault.clone())) {
+        panic_with_error!(env, Error::NotWhitelisted);
+    }
 }
 
 fn position(env: &Env, who: &Address) -> Position {
@@ -514,11 +538,17 @@ fn save_position(env: &Env, who: &Address, pos: &Position) {
     bump(env, &key);
 }
 
-fn reservation(env: &Env, policy_id: u64) -> Reservation {
+fn cover(env: &Env, vault: &Address) -> Cover {
     env.storage()
         .persistent()
-        .get(&DataKey::Reservation(policy_id))
-        .unwrap_or_else(|| panic_with_error!(env, Error::UnknownReservation))
+        .get(&DataKey::Cover(vault.clone()))
+        .unwrap_or_default()
+}
+
+fn save_cover(env: &Env, vault: &Address, cover: &Cover) {
+    let key = DataKey::Cover(vault.clone());
+    env.storage().persistent().set(&key, cover);
+    bump(env, &key);
 }
 
 /// Moves premium earned since the position's last checkpoint into `premium_owed`.

@@ -241,7 +241,10 @@ These go in ARCHITECTURE §10 as "known MVP limitations, addressed in milestone 
 
 - **First-come compensation if cover is too small.** Payout at withdrawal means that if total shortfall exceeded the vault's remaining cover, early withdrawers would be made whole and later ones not. The MVP avoids this by sizing cover above the maximum loss. Milestone 1: record the shortfall when a loss is reported, and share remaining cover pro rata.
 - **Stakers can exit ahead of an unclaimed loss.** A loss exists as soon as a strategy fails, but stakers are only slashed when a depositor withdraws. A staker can unstake *excess* capital in between. The capital backing the vault's cover cannot leave, so payouts are always funded; the remaining stakers just carry more of the loss. Milestone 1: vault reports losses to the pool when they happen.
-- **No cover expiry or streaming premium.** The curator pays upfront; cover lasts until `close_cover`.
+- **No cover expiry or streaming premium.** The curator pays upfront; cover lasts until `close_cover`. On Ethereum, premium streams from depositor principal per second and is split between a platform fee, a pool fee and the restakers (`PremiumManager.distributePremium`). The MVP has no fee split: 100% of the premium goes to stakers.
+- **No curator review gate between claims.** On Ethereum, every approved claim sets `claimApprovalRequired` and the curator must call `approveNextClaim` before the next loss-making withdrawal succeeds. The MVP lets the vault claim repeatedly without review.
+- **No deductible or per-depositor loss cap.** The Ethereum `CoveredVaultWrapper` caps a claim at `maxCoverableLossBps` of the depositor's basis and subtracts `deductibleBps` before filing. The MVP pays the full shortfall.
+- **Cover cannot be topped up on Ethereum; it can here.** Ethereum policies have a fixed `coverageLimit` and need a new policy for more cover. The MVP's `open_cover` adds to the vault's remaining cover, which is simpler for the demo.
 - **Total loss of a strategy is not handled.** If NAV reaches zero with shares outstanding, `deposit` divides by zero. Cover is sized so the demo never gets there.
 - **The admin triggers losses in the mock strategies.** Demo only.
 - **Shares are non-transferable.**

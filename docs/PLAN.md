@@ -219,7 +219,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 - Stellar resets Testnet periodically (roughly quarterly), which wipes deployed contracts. Re-run the script and refresh the IDs in the README shortly before recording the video and before submission.
 - Run it for real on testnet and fix it until it passes end to end. The existing script has never been run: check the CLI argument syntax (`--arg_name`, identity names vs addresses, `--send=no` for views) against the installed CLI version.
 
-**Task 7 — Docs.** Update `README.md` and `docs/ARCHITECTURE.md` to match the code (section 8). Put the testnet contract IDs in the README table.
+**Task 7 — Docs.** ✅ done 25 September 2026. Update `README.md` and `docs/ARCHITECTURE.md` to match the code (section 8). Put the testnet contract IDs in the README table. Added the Apache-2.0 `LICENSE` file.
 
 **Task 8 — Ship.**
 - The repo lives at `github.com/0xcatalysis/catalysis-soroban`, created 25 September 2026. It is **private until submission** (founders' decision, 25 September 2026). Push; confirm CI is green, including the WASM build step.

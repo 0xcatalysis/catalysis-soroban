@@ -1,23 +1,23 @@
 # Catalysis on Soroban — Technical Architecture
 
-**Underwritten bad-debt coverage for Stellar credit markets**
+**Covered vaults for Stellar: staked XLM insurance that pays depositor shortfalls at withdrawal**
 
-Version 1.2 · 25 September 2026 · Prepared for Stellar Community Fund #46, Build Award (Open Track)
+Version 1.3 · 25 September 2026 · Prepared for Stellar Community Fund #46, Build Award (Open Track)
 Authors: Abhishek Kumar, Dhruv Bodani · Catalyst Labs LLC FZ
 
 ---
 
 ## 0. Scope
 
-This specifies the on-ledger design of a coverage protocol for Stellar: the contracts, their storage, their interfaces, the accounting method, the trigger conditions, and the integration surfaces against Blend V2 and DeFindex. It is the design the SCF #46 build executes against.
+This specifies the on-ledger design of a coverage protocol for Stellar: the contracts, their storage, their interfaces, the accounting method, how a shortfall is determined, and the integration surfaces against Blend V2 and DeFindex. It is the design the SCF #46 build executes against.
 
 It does not restate our Ethereum implementation. The Soroban system differs from it in its capital model, its loss accounting and its trigger construction, and section 2 gives the specific properties of Stellar that force each difference.
 
 Every figure carries a source. Where sources disagree the range is given rather than a point estimate, and where a claim could not be verified from a primary source it is marked and the design does not rest on it.
 
-**Implementation status.** The happy path described in sections 3 to 7 is implemented, tested and deployable today at https://github.com/0xcatalysis/catalysis-soroban: CoverPool, Policy, the Blend adapter, 14 passing tests including an end-to-end bad-debt scenario, and a script that runs the same scenario on testnet. Anything scheduled for a milestone is marked as such where it appears.
+**Implementation status.** The covered-vault happy path in sections 3 to 7 is implemented, tested and deployed to testnet at https://github.com/0xcatalysis/catalysis-soroban: CoverPool, CoveredVault, a mock strategy standing in for a Blend market (test and demo only), 83 passing tests including the end-to-end demo scenario, and a script that has run that scenario on testnet. Contract IDs are in the README and in `deployments/testnet.json`. Anything scheduled for a milestone is marked as such where it appears.
 
-**Reading order for a reviewer with limited time:** section 2 (the constraints), section 4 (the staked pool and its slashing guarantee), section 6 (why the pool holds native XLM, which has no Ethereum analogue), section 9.1 (what is actually readable from Blend).
+**Reading order for a reviewer with limited time:** section 2 (the constraints), section 4 (the staked pool and its slashing guarantee), section 5 (the covered vault and payout at withdrawal), section 6 (why the pool holds native XLM, which has no Ethereum analogue).
 
 ---
 
@@ -64,7 +64,7 @@ A first-loss buffer bounded in practice by the depth of its own collateral, held
 
 ### 1.3 What Catalysis adds
 
-A **second-loss layer**: exogenous underwriting capital committed to named pools and vaults under contract, with payout conditions encoded on-ledger and settlement executable by anyone who can observe that the conditions are met. Capital that is not the covered protocol's own token. No claims committee, no governance vote, no discretionary compensation, no validator coordination.
+A **second-loss layer**: exogenous underwriting capital committed to a named vault under contract, with the payout computed on-ledger from the vault's own accounting and paid inside the depositor's withdrawal. Capital that is not the covered protocol's own token. No claims committee, no governance vote, no discretionary compensation, no validator coordination.
 
 We have built this once, on Ethereum, audited and live. That is the reason to fund the Stellar version and not the design for it — what follows is a different system in the ways Stellar requires.
 
@@ -82,7 +82,7 @@ Each item below is a property of Stellar or Soroban that changed a decision. Rem
 
 **2.4 There is no multicall.** stellar-core enforces one operation per Soroban transaction and rejects mixing Soroban with non-Soroban operations. Batching happens *inside* a single invocation, in a loop bounded by the live footprint limit — so batch sizes are contract parameters read from storage, never compile-time constants.
 
-**2.5 Persistent state archives, and the fix is bundled, not separate.** Every capacity position and every policy is a persistent ledger entry with its own TTL; minimum and maximum TTLs are network parameters. Two properties we rely on: TTL extension has no access control — "any user may invoke `ExtendFootprintTTLOp` on any LedgerEntry" — so a keeper can maintain positions without a signature from their owner; and from protocol 23 archived persistent entries in a transaction's restore list are restored automatically when the invocation executes, so a claim against an archived entry needs no separate `RestoreFootprintOp` (which must be the only operation in its transaction and would therefore be unusable mid-settlement). The docs also warn that "TTL extensions should never be relied on for functionality or safety." Section 8 takes that seriously.
+**2.5 Persistent state archives, and the fix is bundled, not separate.** Every staker position, every depositor position and every vault's cover is a persistent ledger entry with its own TTL; minimum and maximum TTLs are network parameters. Two properties we rely on: TTL extension has no access control — "any user may invoke `ExtendFootprintTTLOp` on any LedgerEntry" — so a keeper can maintain positions without a signature from their owner; and from protocol 23 archived persistent entries in a transaction's restore list are restored automatically when the invocation executes, so a claim against an archived entry needs no separate `RestoreFootprintOp` (which must be the only operation in its transaction and would therefore be unusable mid-settlement). The docs also warn that "TTL extensions should never be relied on for functionality or safety." Section 8 takes that seriously.
 
 **2.6 Reflector gives prices, not price analytics, and its resolution is coarse.** Reflector's public Pulse feeds default to a 5-minute resolution with a 24-hour default history retention period, and expose SEP-40's `price`, `prices` and `lastprice` — **no TWAP function**. Time weighting is computed consumer-side from `prices(asset, records)`, and retention bounds any window at 24 hours. Reflector's Beam product updates faster but charges an XRF fee per read and requires the caller to authorize a burn, putting a token dependency and a sub-invocation in the read path; we design against Pulse. Both `resolution()` and `history_retention_period()` are contract-readable and we read them rather than assuming the defaults.
 
@@ -92,7 +92,7 @@ Each item below is a property of Stellar or Soroban that changed a decision. Rem
 
 **2.9 Cross-contract reentrancy is blocked by the host.** `rs-soroban-env` defaults every external contract call to `ContractReentryMode::Prohibited`, and detection scans the whole context stack, so indirect reentry (A→B→A) is caught. This removes a class of attack and also a pattern: no callback-driven settlement, no reentrant vault hooks. Settlement resolves state fully before any external transfer.
 
-**2.10 Upgrades replace Wasm and do not re-run constructors.** `update_current_contract_wasm` preserves address and storage, and CAP-0058 states that on code update a contract "is not considered created and thus constructor won't be called," so a constructor in the current Wasm carries no guarantee of having run. Contracts therefore carry an explicit, idempotent, version-gated `migrate()`. There is no delegatecall and contract size is capped, so the system is several contracts rather than one.
+**2.10 Upgrades replace Wasm and do not re-run constructors.** `update_current_contract` preserves address and storage, and CAP-0058 states that on code update a contract "is not considered created and thus constructor won't be called," so a constructor in the current Wasm carries no guarantee of having run. The MVP has an admin-only `upgrade` on each contract and no state migration; an explicit, idempotent, version-gated `migrate()` arrives with the multisig in milestone 3. There is no delegatecall and contract size is capped, so the system is several contracts rather than one.
 
 **2.11 Network liquidity is thin and concentrated in a single venue.** Aquarius carries about 98.7% of DefiLlama-tracked Stellar DEX volume — $5.28M of $5.35M over 24 hours, $69.24M of $70.87M over 30 days, as of 25 September 2026. **No part of this system may assume it can liquidate collateral on-ledger at size.** Claims settle in the asset the pool already holds. We never sell collateral into a Stellar venue to fund a payout.
 
@@ -100,49 +100,46 @@ Each item below is a property of Stellar or Soroban that changed a decision. Rem
 
 ## 3. System overview
 
-Four contract roles. Three are implemented in the repository today — CoverPool, Policy and the Blend observation adapter — together with a mock Blend pool that exists only for tests and the testnet demo. The fourth, an oracle trigger module for positions with no accounting signal, is milestone 2.
+Three contracts. Two are the product: the CoverPool and the CoveredVault. The third, MockStrategy, stands in for a Blend market and exists only for tests and the testnet demo; milestone 1 replaces it with a strategy that supplies to a real Blend V2 pool.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
 │ STELLAR / SOROBAN                                                     │
 │                                                                       │
-│  COVERED PROTOCOL                    CATALYSIS                        │
-│  ┌──────────────────┐               ┌──────────────────────────────┐  │
-│  │ Blend V2 pool    │◄─get_reserve──│ (3) Blend adapter            │  │
-│  │  reserve b_rate  │               │     read-only                │  │
-│  └──────────────────┘               └──────────────┬───────────────┘  │
-│                                                    │ b_rate           │
-│  ┌──────────────────┐   buy cover   ┌──────────────▼───────────────┐  │
-│  │ Vault / lender   │──────────────►│ (2) Policy                   │  │
-│  │ (beneficiary)    │               │  baseline · trigger · payout │  │
-│  └────────▲─────────┘               └──────────────┬───────────────┘  │
-│           │                        reserve ·       │ settle           │
-│           │ payout                 premium         ▼                  │
-│           │                         ┌──────────────────────────────┐  │
-│           └─────────────────────────│ (1) CoverPool                │  │
-│                                     │  staked XLM · shares ·       │  │
-│                                     │  premium index               │  │
-│                                     └──────────────▲───────────────┘  │
-│                                                    │ stake / unstake  │
-│                                     ┌──────────────┴───────────────┐  │
-│                                     │ Stakers (native XLM)         │  │
-│                                     └──────────────────────────────┘  │
-│                                                                       │
-│  milestone 2:  (4) oracle trigger module ◄── Reflector SEP-40 feeds   │
+│                     deposit / withdraw                                │
+│   Depositor ──────────────────────────────►┌──────────────────────┐   │
+│   (paid in full)                           │ (2) CoveredVault     │   │
+│                                            │  shares · principal  │   │
+│        ┌─────────────── allocate ──────────│  idle · strategies   │   │
+│        │                                   └───┬──────────────▲───┘   │
+│        ▼                                       │ buy_cover    │ claim │
+│  ┌──────────────┐  ┌──────────────┐            │ (premium)    │ short-│
+│  │ Strategy A   │  │ Strategy B   │            ▼              │ fall  │
+│  │ (Blend mkt)  │  │ (Blend mkt)  │       ┌──────────────────────┐    │
+│  └──────────────┘  └──────────────┘       │ (1) CoverPool        │    │
+│   test and demo: MockStrategy             │  staked XLM · shares │    │
+│   milestone 1:  Blend V2 strategy         │  premium index       │    │
+│                                           └──────────▲───────────┘    │
+│                                                      │ stake/unstake  │
+│                                           ┌──────────┴───────────┐    │
+│                                           │ Stakers (native XLM) │    │
+│                                           └──────────────────────┘    │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-Capital custody, policy state, trigger evaluation and settlement all execute on Stellar; nothing in the settlement path leaves the ledger. The adapter calls only Blend's public read function and holds no authority over the pool it observes.
+Capital custody, vault accounting and settlement all execute on Stellar; nothing in the payout path leaves the ledger, and nothing in it reads a price.
 
-**The flow.** Stakers stake XLM into a CoverPool and receive shares under a lock period. A vault or lender buys cover on its supply position in a Blend reserve: the Policy contract records the reserve's `b_rate` as a baseline, reserves the policy's limit in the CoverPool together with the beneficiary, and charges premium, which goes to stakers. If Blend later socializes bad debt across that reserve's suppliers, it lowers `b_rate`. Once the decline passes the trigger threshold, anyone may call `settle`: the covered loss — `covered_amount × decline`, capped at the limit — is paid to the beneficiary recorded at reservation, and every staker is slashed pro rata through the pool's share value. If nothing happens before the policy ends, anyone may call `expire` and the reserved capacity returns to the pool.
+**The flow.** Stakers stake XLM into a CoverPool and receive shares under a lock period. The vault's curator buys cover for the vault: the pool reserves the limit and charges a premium, which goes to the stakers. Depositors put XLM into the vault and receive internal shares; the vault records each depositor's principal. The curator allocates idle XLM to whitelisted strategies. If a strategy loses money, the vault's net asset value falls and every depositor's shares are worth less than their principal. When a depositor withdraws, the vault values their shares, claims the difference between principal and value from the CoverPool in the same transaction, and pays the depositor in full. The claim lowers the pool's capital, so every staker is slashed pro rata through the share value. There is no trigger, no oracle and no claims process: the shortfall is the vault's own accounting.
 
-**Policies are entries in one Policy contract, not one contract instance each.** A factory-per-policy design would put a contract instance and its own rent under every policy, and Soroban's instance storage shares the contract's TTL, so a thousand policies would mean a thousand instances to keep alive. A single contract holding policies as persistent entries keyed by `u64` costs one entry per policy.
+**This is the Ethereum product, not a new one.** On Ethereum, Catalysis wraps a Morpho vault and files its claim inside the depositor's withdrawal. Here the vault and the wrapper are one contract, because Stellar has no curated XLM vault to wrap; section 5 says what carries over and what is deliberately simpler.
+
+**Positions are entries, not contract instances.** Each staker's and each depositor's position is a persistent ledger entry keyed by address in the pool or the vault. A factory-per-position design would put a contract instance and its own rent under every position, and Soroban's instance storage shares the contract's TTL, so a thousand positions would mean a thousand instances to keep alive.
 
 ---
 
 ## 4. Contract 1 — CoverPool
 
-A staked capital pool that underwrites coverage. This is the Stellar-native replacement for the EigenLayer and Symbiotic capacity our Ethereum system draws on (2.2): not restaking, but a plain capital pool with slashing on payout, which is what the coverage layer actually needs. Source: [`contracts/cover_pool`](https://github.com/0xcatalysis/catalysis-soroban/tree/main/contracts/cover_pool).
+A staked capital pool that insures covered vaults. This is the Stellar-native replacement for the EigenLayer and Symbiotic capacity our Ethereum system draws on (2.2): not restaking, but a plain capital pool with slashing on claim, which is what the coverage layer actually needs. Source: [`contracts/cover_pool`](https://github.com/0xcatalysis/catalysis-soroban/tree/main/contracts/cover_pool).
 
 ### 4.1 Storage
 
@@ -152,13 +149,14 @@ pub struct PoolConfig {
     pub admin: Address,
     pub asset: Address,        // Stellar Asset Contract of the staked asset: native XLM
     pub lock_ledgers: u32,     // minimum stake duration
+    pub premium_bps: u32,      // premium charged on open_cover, as bps of the limit
 }
 
 #[contracttype]
 pub struct PoolState {
     pub total_capital: i128,   // asset units backing all shares
     pub total_shares: i128,
-    pub coverage_written: i128,// sum of reserved policy limits
+    pub coverage_written: i128,// sum of every vault's remaining cover
     pub premium_index: i128,   // cumulative premium per share, 1e18 fixed point
     pub premiums_paid: i128,
     pub claims_paid: i128,
@@ -173,11 +171,13 @@ pub struct Position {          // one persistent entry per staker
 }
 
 #[contracttype]
-pub struct Reservation {       // one persistent entry per live policy
-    pub limit: i128,
-    pub beneficiary: Address,
+pub struct Cover {             // one persistent entry per covered vault
+    pub remaining: i128,       // what can still be claimed
+    pub claimed: i128,         // running total already paid out
 }
 ```
+
+The whitelist of covered vaults is a set of instance-storage keys: it is small and admin-managed.
 
 ### 4.2 Interface
 
@@ -187,120 +187,158 @@ fn stake(env, from: Address, amount: i128) -> i128;          // -> shares
 fn unstake(env, from: Address, shares: i128) -> i128;        // -> amount
 fn claim_premium(env, from: Address) -> i128;
 
-// policy-facing — each requires auth from the registered Policy contract
-fn reserve(env, policy_id: u64, limit: i128, beneficiary: Address);
-fn release(env, policy_id: u64);
-fn accrue_premium(env, policy_id: u64, from: Address, amount: i128);
-fn settle_claim(env, policy_id: u64, payout: i128) -> i128;
+// admin
+fn add_vault(env, vault: Address);                            // whitelist a covered vault
+
+// vault-facing — each requires the vault's own auth and the vault to be whitelisted
+fn open_cover(env, vault: Address, payer: Address, limit: i128) -> i128;  // -> premium
+fn claim(env, vault: Address, amount: i128) -> i128;          // partial, repeatable
+fn close_cover(env, vault: Address);                          // releases what remains
 
 // views and operations
 fn available_capacity(env) -> i128;
+fn cover(env, vault: Address) -> Cover;
+fn is_vault(env, vault: Address) -> bool;
 fn state(env) -> PoolState;
 fn position(env, staker: Address) -> PositionView;   // shares, value, premium, lock
 fn share_value(env) -> i128;
 fn bump_position(env, staker: Address);             // permissionless TTL extension
-fn set_policy_contract(env, policy: Address);       // admin, once
+fn upgrade(env, wasm_hash: BytesN<32>);              // admin
 ```
 
-**Why the beneficiary is stored in the pool.** The obvious design has the pool read the payout recipient back from the Policy contract at settlement. On Soroban that call cannot happen. Settlement starts at `Policy.settle`, so the Policy contract is already on the call stack when the pool runs, and the host rejects any call back into it (2.9). The pool therefore records the beneficiary when it reserves capacity and pays that address at settlement. The Policy contract supplies only the payout amount, and the pool caps it at the reserved limit. Even a faulty Policy contract cannot redirect an existing reservation's payout, or pay more than its limit.
+**The claimant is the vault itself, and there is no recipient parameter.** `claim` pays the vault that calls it, against that vault's own cover. On Soroban a contract's authorization is implicit when it is the direct invoker, so the pool's `vault.require_auth()` passes only when the vault contract itself makes the call; a plain account cannot claim on a vault's behalf. Nothing in the interface can direct a payout anywhere except to the whitelisted vault whose cover it draws on, and the pool caps every claim at that vault's remaining cover. The pool never calls back into the vault (2.9): the vault calls the pool, the pool calls only the token, and the vault pays its depositor afterwards.
 
-**Authorization.** The four policy-facing functions begin by requiring auth from the Policy contract registered at deployment and reject any other caller. Staker functions require the staker's own auth. `bump_position` is permissionless because it cannot move value.
+**Authorization.** The three vault-facing functions require the vault's auth and reject vaults the admin has not whitelisted. Staker functions require the staker's own auth. `add_vault` and `upgrade` require the admin. `bump_position` and the views are permissionless because they cannot move value. The premium payer authorizes the premium transfer through the token: in practice the vault's curator signs `buy_cover` on the vault, and that signature covers the nested transfer.
 
 ### 4.3 Design decisions
 
 **Custody-lock, never allowance.** `stake` moves the asset into the pool contract's own balance in the staker's signed transaction. From that ledger the pool owns the funds and needs no staker authorization to pay a claim. The alternative fails on its own terms: SEP-41 states that "an allowance is a spending limit, not a reservation. It does not lock any of `from`'s balance and may exceed it," and a staker could revoke it the moment a loss looked likely.
 
-**Segregated pools, not one mutual.** A pool underwrites the policies written against it, so a staker chooses the risk they hold instead of inheriting an aggregate they cannot inspect.
+**Segregated pools, not one mutual.** A pool insures the vaults whitelisted on it, so a staker chooses the risk they hold instead of inheriting an aggregate they cannot inspect.
 
-**Fully collateralised, so the pool cannot fall short.** Coverage written never exceeds capital, and `unstake` refuses any withdrawal that would take capital below coverage written. Together these make a shortfall impossible rather than merely unlikely. If capital ≥ coverage before a claim, and the payout is at most that policy's limit, then after the claim `capital − payout ≥ coverage − limit`. Every remaining policy stays fully backed, whatever order claims arrive in.
+**Fully collateralised, so the pool cannot fall short.** Coverage written never exceeds capital, and `unstake` refuses any withdrawal that would take capital below coverage written. Together these make a shortfall impossible rather than merely unlikely. A claim of `a` reduces capital by `a` and coverage written by `a`, so if `capital ≥ coverage` before the claim it still holds after, whatever order claims arrive in and however many partial claims a vault makes. This is stricter than the Ethereum system, which checks stake against the limit once at binding.
 
-**Reservation is atomic with issuance.** `reserve` executes inside the issuance transaction and fails if capacity is short. Over-writing coverage is prevented by the contract, not by monitoring.
+**Cover is reserved atomically with the purchase.** `open_cover` reserves the limit and charges the premium in one call and fails if capacity is short. Over-writing coverage is prevented by the contract, not by monitoring.
 
-**Lock period.** A stake cannot be withdrawn before `locked_until`. Combined with full collateralisation, this means capital committed behind a live policy stays until that policy settles or expires.
+**The pool prices its own cover.** The premium is `limit × premium_bps / 10,000`, set at deployment, paid upfront by the vault's curator, and credited to stakers through the premium index. It is not part of `total_capital`, so it cannot be slashed.
+
+**Many partial claims against one cover.** Each withdrawal with a shortfall is its own claim. `remaining` falls and `claimed` rises until the cover is exhausted, and `close_cover` releases whatever is left while keeping the claimed total for the record.
+
+**Lock period.** A stake cannot be withdrawn before `locked_until`. Combined with full collateralisation, this means capital backing live cover stays until that cover is claimed or closed.
+
+**Dust is rejected, not rounded away.** A stake into a pool that has been slashed to zero fails, and an unstake that would pay nothing fails. Rounding elsewhere is down, in the pool's favour.
 
 **Invariants, enforced on every transition:**
 
 ```
+coverage_written == Σ cover.remaining
 coverage_written <= total_capital
 unstake leaves total_capital >= coverage_written
-payout <= reservation.limit
+claim amount <= cover.remaining
 ```
 
 ### 4.4 Scheduled for milestone 1
 
 The MVP covers the full happy path. Three refinements follow in milestone 1:
 
+- **Loss reporting.** Today a loss exists as soon as a strategy fails, but stakers are slashed only when a depositor withdraws, so a staker can unstake *excess* capital in between (the capital backing cover cannot leave). The vault will report losses to the pool when they happen, so the slash lands at once and remaining cover is shared pro rata rather than first-come.
 - **A notice period after the lock**, so a withdrawal is announced before it executes.
-- **A claim freeze keyed to pending bad debt.** Withdrawals pause while the covered Blend reserve shows bad debt sitting on its backstop (9.1). The freeze is triggered by real bad debt in Blend rather than by anyone calling a function, so it cannot be cheaply griefed, and it is bounded by a deadline.
 - **USDC pools.** The pool asset is already a constructor parameter.
 
-Fractional collateralisation is not planned for this grant. If it is ever introduced, the pool would need a pro-rata shortfall rule rather than first-come settlement, which rewards whoever races the ledger.
+Fractional collateralisation is not planned for this grant.
 
 ---
 
-## 5. Contract 2 — Policy
+## 5. Contract 2 — CoveredVault
 
-Parametric bad-debt cover on a supply position in a Blend reserve. Source: [`contracts/policy`](https://github.com/0xcatalysis/catalysis-soroban/tree/main/contracts/policy).
+An XLM vault whose depositors are insured by a CoverPool. Source: [`contracts/covered_vault`](https://github.com/0xcatalysis/catalysis-soroban/tree/main/contracts/covered_vault).
 
 ### 5.1 Storage and interface
 
 ```rust
 #[contracttype]
-pub struct Terms {                 // set at deployment, applies to every policy
-    pub admin: Address,
-    pub pool: Address,
-    pub adapter: Address,
-    pub premium_bps: u32,          // premium as bps of the limit
-    pub trigger_bps: u32,          // minimum b_rate decline that pays
-    pub duration_ledgers: u32,
+pub struct VaultConfig {
+    pub admin: Address,            // the curator
+    pub asset: Address,            // native XLM
+    pub cover_pool: Address,
 }
 
 #[contracttype]
-pub struct Policy {
-    pub buyer: Address,
-    pub beneficiary: Address,
-    pub target: Address,           // Blend pool
-    pub asset: Address,            // reserve asset supplied in that pool
-    pub covered_amount: i128,      // size of the covered supply position
-    pub limit: i128,               // maximum payout, reserved in the CoverPool
-    pub premium: i128,
-    pub baseline_rate: i128,       // b_rate observed at issuance
-    pub start_ledger: u32,
-    pub end_ledger: u32,
-    pub status: Status,            // Active | Paid | Expired
-    pub payout: i128,
+pub struct VaultState {
+    pub total_shares: i128,
+    pub idle: i128,                // held by the vault itself, not allocated
 }
 
-fn issue(env, buyer, beneficiary, target, asset, covered_amount, limit) -> u64;
-fn check(env, policy_id: u64) -> Check;    // live reading against the trigger
-fn settle(env, policy_id: u64) -> i128;    // permissionless
-fn expire(env, policy_id: u64);            // permissionless, after end_ledger
-fn get(env, policy_id: u64) -> Policy;
+#[contracttype]
+pub struct Position {             // one persistent entry per depositor
+    pub shares: i128,
+    pub principal: i128,           // cost basis: deposits, reduced pro rata on withdrawal
+}
+
+// strategies: Vec<Address>, instance storage; the curator's whitelist
+pub const DEDUCTIBLE_BPS: i128 = 0;   // share of a shortfall the depositor bears
+
+// curator
+fn add_strategy(env, strategy: Address);
+fn buy_cover(env, limit: i128) -> i128;           // curator pays the premium
+fn close_cover(env);
+fn allocate(env, strategy: Address, amount: i128); // idle -> strategy
+
+// depositors
+fn deposit(env, from: Address, amount: i128) -> i128;    // -> shares
+fn withdraw(env, from: Address, shares: i128) -> i128;   // -> amount paid
+
+// views
+fn nav(env) -> i128;                              // idle + Σ strategy.total_value()
+fn position(env, depositor: Address) -> PositionView;   // shares, value, principal, shortfall
+fn strategies(env) -> Vec<Address>;
 ```
 
-### 5.2 The payout rule, and why the backstop is the deductible
+Shares are internal and non-transferable, which is what makes per-address principal tracking correct. A depositor who arrives after a loss buys shares at the lower net asset value, so their principal equals their value and they carry no shortfall.
+
+### 5.2 The payout rule, and why it runs at withdrawal
 
 ```
-decline = (baseline_rate − current_rate) / baseline_rate
-payable = decline ≥ trigger_bps
-payout  = min(covered_amount × decline, limit)
+value     = shares × nav / total_shares                 (rounds down)
+protected = principal × shares / position.shares        (rounds down)
+shortfall = max(protected − value, 0)
+claimable = shortfall − shortfall × DEDUCTIBLE_BPS / 10,000
+paid      = value + claimable
 ```
 
-A supplier's claim on a Blend reserve is their bTokens × `b_rate`, so a fall in `b_rate` is exactly the supplier's proportional loss. The payout is therefore indemnity-shaped, not a binary lump sum: the vault receives what it actually lost, up to the limit it bought.
+`withdraw` values the shares first, then brings `value` of liquidity into the vault (idle first, then the strategies in whitelist order), then claims `claimable` from the CoverPool, then pays the depositor and updates the books. The shortfall claimed from the pool passes through the vault's balance without touching `idle`, which is accounting state rather than the live token balance.
 
-The backstop acts as the deductible without any parameter. Blend lowers `b_rate` only when it defaults debt that the backstop could not absorb (9.1). So this trigger fires only on losses that have already got past the backstop. Catalysis sits behind the backstop, never in place of it, and the backstop keeps doing the job it is good at. The trigger threshold then filters out socialized losses too small to be worth a claim.
+**Why payout at withdrawal.** This is how Catalysis works on Ethereum, where the covered vault wrapper files its claim inside `_withdraw`. It needs no trigger and no oracle: a loss in a strategy lowers the vault's net asset value, and the vault's own accounting says exactly what each depositor is short. The loss event we most want to cover is the one where an oracle has already failed, so making the payout depend on a price in that moment would repeat the mistake one layer up. The payout depends on nothing but the vault's books.
 
-### 5.3 Settlement is permissionless, and that is a property not a feature
+**The deductible is zero, and present.** `DEDUCTIBLE_BPS` is a constant so that the withdrawal maths has the same shape as the Ethereum wrapper's `_capAndApplyDeductible`. It is not configurable in the MVP.
 
-Anyone may call `settle`, and the payout goes to the beneficiary recorded at reservation, whoever calls. There is no claims role, no adjudicator, and no code path by which a Catalysis-controlled key can withhold a valid payout or redirect one: the recipient is fixed in the pool (4.2), and the trigger condition is computed from Blend's own state in the same transaction. The trade-off is that every trigger must be **decidable from on-ledger state**, which is the constraint that shapes section 9.
+### 5.3 The worked example
 
-### 5.4 Trigger types beyond the MVP
+This is the integration test and the testnet demo, with every number asserted.
 
-The MVP implements the Blend trigger described above. Scheduled next:
+| # | Step | On-chain effect |
+|---|---|---|
+| 0 | Alice stakes 1,000 XLM into the CoverPool | Pool capital 1,000 |
+| 0 | The curator buys 50 XLM of cover, paying a 2.5% premium (1.25 XLM) | Pool reserves 50 for the vault; the premium is Alice's |
+| 1 | A user deposits 100 XLM; the curator allocates 50 to Market A and 50 to Market B | Vault NAV 100 |
+| 2 | Market B fails and loses 20% of its funds (10 XLM) | Vault NAV 90 |
+| 3 | The user's position: value 90, protected 100, shortfall 10 | View call |
+| 4 | The user withdraws. The vault pulls 90 from the strategies, claims 10 from the pool, and the pool slashes Alice by 10 | Alice's stake 1,000 → 990; remaining cover 50 → 40 |
+| 5 | The user receives the full 100 XLM | Withdrawal completes |
 
-- **Pending bad debt as an early warning** (milestone 1). It drives the withdrawal freeze in 4.4 and never pays out on its own.
-- **Share-value decline for DeFindex vaults** (milestone 2).
-- **Oracle-derived triggers**, for positions that have no accounting signal (milestone 2, section 9.2).
+The quiet path — no loss, the user withdraws exactly what they put in, no claim, no slashing — is the second integration test.
+
+### 5.4 Strategies
+
+A strategy is anything that exposes `total_value()` and `withdraw(amount)` and accepts XLM by plain transfer; the interface lives in [`contracts/common`](https://github.com/0xcatalysis/catalysis-soroban/tree/main/contracts/common).
+
+**MockStrategy — test and demo only.** Holds real XLM, so a simulated loss really moves tokens out and the balances on the explorer match the story. `simulate_loss(bps)` transfers that fraction of the balance to the admin. It has no yield. Never deploy it with real funds.
+
+**Blend V2 strategy — milestone 1.** Supplies XLM to a Blend pool through `submit` and values its position as `b_tokens × b_rate`, read through Blend's public `get_reserve` and `get_positions`. Blend socializes bad debt by lowering `b_rate` (9.1), so a socialized loss shows up in `total_value()` and therefore in every depositor's shortfall, with no trigger. The `Reserve` types needed for that read are already in `contracts/common`, mirrored field for field from `blend-contracts-v2`.
+
+### 5.5 What the vault does not do in the MVP
+
+The Ethereum wrapper has controls the MVP deliberately omits: streaming premium charged to depositors, a per-depositor loss cap, a curator review gate between successive claims, a deposit cap, and an emergency exit that waives insurance. Section 10.5 lists these with the milestone that adds each.
 
 ---
 
@@ -330,7 +368,7 @@ Native XLM has no issuer. It has no authorization flags, no freeze and no clawba
 
 The trade-off is price correlation, and we state it plainly. XLM's price tends to fall when the whole Stellar ecosystem is under stress, so the pool's capacity measured in dollars shrinks in exactly those conditions. This is a weaker form of the wrong-way risk we criticize in Blend's backstop (1.2), and the difference is worth being precise about. BLND is correlated with the one protocol it backstops, and it sits inside an AMM pool whose bugs are the backstop's bugs. XLM is the network's base asset, has no AMM dependency, and is not the token of any covered protocol.
 
-Cover is written in the pool's own asset. An XLM pool covers XLM supply positions, and the largest single leg of the February loss was 61.25 million XLM borrowed out of the pool's XLM reserve. For cover denominated in a stablecoin, the pool asset is a constructor parameter, so a USDC pool is a redeploy rather than a code change. That pool carries Circle's freeze right, which we would disclose per policy.
+Cover is written in the pool's own asset. An XLM pool covers an XLM vault, and the largest single leg of the February loss was 61.25 million XLM borrowed out of the pool's XLM reserve. For cover denominated in a stablecoin, the pool asset is a constructor parameter, so a USDC pool is a redeploy rather than a code change. That pool carries Circle's freeze right, which we would disclose per vault.
 
 ### 6.3 Issued assets later
 
@@ -352,31 +390,33 @@ Constraint 2.3 forbids per-position writes in settlement. A claim against a pool
 
 ### 7.2 Shares are immutable; loss moves the share value
 
-The pool holds `total_capital` against `total_shares`, and a share is a claim on `total_capital / total_shares`. Settlement reduces capital and leaves every share count untouched. The loss therefore lands on all stakers pro rata, instantly, with no per-position work and nothing to realize later. This is the slashing guarantee, and it is the implemented code:
+The pool holds `total_capital` against `total_shares`, and a share is a claim on `total_capital / total_shares`. A claim reduces capital and leaves every share count untouched. The loss therefore lands on all stakers pro rata, instantly, with no per-position work and nothing to realize later. This is the slashing guarantee, and it is the implemented code:
 
 ```rust
-pub fn settle_claim(env: Env, policy_id: u64, payout: i128) -> i128 {
-    require_policy_contract(&env);
+pub fn claim(env: Env, vault: Address, amount: i128) -> i128 {
+    require_vault(&env, &vault);                     // vault's own auth + whitelist
     let cfg = config(&env);
-    let res = reservation(&env, policy_id);          // limit + beneficiary
-    if payout > res.limit {
-        panic_with_error!(&env, Error::PayoutExceedsLimit);
+    let mut cover = cover(&env, &vault);
+    if amount > cover.remaining {
+        panic_with_error!(&env, Error::ClaimExceedsCover);
     }
 
     let mut st = state(&env);
-    st.total_capital -= payout;                      // every staker slashed pro rata
-    st.coverage_written -= res.limit;
-    st.claims_paid += payout;
-    env.storage().persistent().remove(&DataKey::Reservation(policy_id));
+    st.total_capital -= amount;                      // every staker slashed pro rata
+    st.coverage_written -= amount;
+    st.claims_paid += amount;
+    cover.remaining -= amount;
+    cover.claimed += amount;
+    save_cover(&env, &vault, &cover);                // the vault's cover entry
     save_state(&env, &st);                           // pool state
 
-    token::Client::new(&env, &cfg.asset)             // pool and beneficiary balances
-        .transfer(&env.current_contract_address(), &res.beneficiary, &payout);
-    payout
+    token::Client::new(&env, &cfg.asset)             // pool and vault balances
+        .transfer(&env.current_contract_address(), &vault, &amount);
+    amount
 }
 ```
 
-That is three state writes: the pool state, and the two balances the transfer touches. The count stays the same however many stakers there are.
+That is four state writes: the cover entry, the pool state, and the two balances the transfer touches. The count stays the same however many stakers there are. Slashing happens at claim time, and a claim happens inside a depositor's withdrawal (5.2), so stakers are slashed at the moment the vault actually pays a shortfall.
 
 This is the mechanism Blend itself uses — `default_liabilities` socializes a loss by moving `reserve.data.b_rate`, not by touching balances — and the one ERC-4626 uses. We rejected two alternatives:
 
@@ -390,17 +430,17 @@ Unstaking pays `shares × total_capital / total_shares`. Staking mints `amount �
 - On accrual, `premium_index` advances by `amount × 10¹⁸ / total_shares`.
 - A staker's earned premium is `shares × (premium_index − premium_index_entry) / 10¹⁸`. It is settled into their own entry whenever their share count changes, so claiming writes only that one entry.
 
-The integration test replays a 12% loss with two stakers at a 60/40 split. Each is slashed exactly 6% and keeps exactly their share of the premium.
+The integration test replays the demo: Alice's 1,000 XLM stake is slashed exactly 10 XLM when the user withdraws, and she keeps her 1.25 XLM premium. A unit test walks three sequential partial claims against a 60/40 pair of stakers and checks the split after each one.
 
 ---
 
 ## 8. Rent, TTL and liveness
 
-Staker positions must survive a lock period during which the staker does nothing, and policies must survive to their end ledger. Both are persistent entries with independent TTLs (2.5).
+Staker positions must survive a lock period during which the staker does nothing, and depositor positions must survive for as long as the deposit sits in the vault. Both are persistent entries with independent TTLs (2.5), as is each vault's cover entry in the pool.
 
-**Today.** Every write extends the entry it touches, so any position or policy that is interacted with stays live. `bump_position` lets anyone extend a staker's entry without their signature.
+**Today.** Every write extends the entry it touches, so any position or cover that is interacted with stays live. `bump_position` on the pool and on the vault lets anyone extend a position entry without its owner's signature.
 
-**Milestone 2: a funded keeper.** A standing deduction from premium funds TTL maintenance. The position exists because a policy was sold, so the premium that policy generates keeps it alive. Stakers are not asked to fund rent on a position they cannot touch during the lock, and depositors in covered vaults are not charged for our storage at all.
+**Milestone 2: a funded keeper.** A standing deduction from premium funds TTL maintenance. The position exists because cover was sold, so the premium that cover generates keeps it alive. Stakers are not asked to fund rent on a position they cannot touch during the lock, and depositors in covered vaults are not charged for our storage at all.
 
 TTL extension has no access control, so anyone may extend any entry. We will publish the keeper so third parties can run one.
 
@@ -412,50 +452,45 @@ Rent pricing is itself a live network parameter rather than a constant — stell
 
 ## 9. Triggers: what is decidable on-ledger
 
-Section 5.3 requires every trigger to be decidable from on-ledger state. This section says how.
+The MVP needs no trigger. The payout condition is the vault's own accounting (5.2): a depositor is paid whatever their shares are worth plus whatever that falls short of their principal. This section covers how the milestone-1 Blend strategy will value its position, which is where Blend's on-ledger state enters the design, and the oracle-derived triggers scheduled for milestone 2 for positions that have no accounting signal.
 
-### 9.1 The payout trigger reads accounting, not prices
+### 9.1 A Blend strategy's value is accounting, not a price
 
-The loss event we most want to cover is the one where the oracle has already failed, so making the payout depend on an oracle in that moment would repeat the mistake one layer up. The payout trigger is state-derived.
+*Milestone 1.* The loss event we most want to cover is the one where the oracle has already failed, so a strategy's value must come from the covered protocol's own books.
 
-**On Blend, the observable has to be chosen carefully, because the obvious one disappears at the moment of the event.** Bad debt is not a readable field: `bad_debt(user)` is a state-changing transition whose documented behaviour is that the backstop "will take over the debt," and if the backstop is itself unhealthy it "will default it's remaining debt." Pending bad debt therefore shows up as d-token liabilities sitting on the backstop address — but socialization, in `default_liabilities`, *removes* those liabilities and reduces `reserve.data.b_rate`. An adapter that watched backstop liabilities would see its signal go to zero exactly when the covered event occurred.
+**On Blend, the observable has to be chosen carefully, because the obvious one disappears at the moment of the event.** Bad debt is not a readable field: `bad_debt(user)` is a state-changing transition whose documented behaviour is that the backstop "will take over the debt," and if the backstop is itself unhealthy it "will default it's remaining debt." Pending bad debt therefore shows up as d-token liabilities sitting on the backstop address — but socialization, in `default_liabilities`, *removes* those liabilities and reduces `reserve.data.b_rate`. A strategy that watched backstop liabilities would see its signal go to zero exactly when the covered event occurred.
 
-So the two states are separate triggers with different jobs:
+So the two states play different roles:
 
-- **`BadDebtPending`** (milestone 1) reads backstop liabilities and is an early warning: it can open monitoring and inform pricing, and it never pays out. It is also poke-dependent — debt reaches the backstop only when someone calls `bad_debt(user)`, and that call panics while a liquidation or bad-debt auction is open — so its absence proves nothing.
-- **`BadDebtSocialized`** reads `b_rate` on the covered reserve against the baseline recorded at issuance and is the payout trigger — implemented. A `b_rate` decline beyond `threshold_bps` is the on-ledger signature of supplier loss, corroborated by Blend's `defaulted_debt` event.
+- **`b_rate`** is what the strategy values itself by. A supplier's claim on a Blend reserve is their bTokens × `b_rate`, so `total_value = b_tokens × b_rate / 10¹²`, read through Blend's public `get_reserve` and `get_positions`. When Blend socializes a loss it lowers `b_rate`, the strategy is worth less, and every depositor's shortfall appears at withdrawal with no further mechanism. The backstop acts as the deductible without any parameter: Blend lowers `b_rate` only when it defaults debt that the backstop could not absorb, so Catalysis sits behind the backstop, never in place of it.
+- **Backstop liabilities** are an early warning: pending bad debt that has not yet been socialized. Milestone 1 uses them to drive loss reporting (4.4) so stakers cannot exit ahead of a loss that is visible but not yet booked. They never pay out on their own, and they are poke-dependent — debt reaches the backstop only when someone calls `bad_debt(user)`, and that call panics while a liquidation or bad-debt auction is open — so their absence proves nothing.
 
 ```rust
-// blend_adapter (implemented) — read-only, through Blend's public interface (2.8)
-pub fn observe(env: Env, target: Address, asset: Address) -> i128 {
-    BlendPoolClient::new(&env, &target).get_reserve(&asset).data.b_rate
-}
-
-// policy (implemented) — evaluated inside settle, in the same transaction
-let current = AdapterClient::new(&env, &terms.adapter).observe(&p.target, &p.asset);
-let decline_bps = (p.baseline_rate - current) * BPS / p.baseline_rate;
-let payable = decline_bps >= terms.trigger_bps as i128;
-let payout  = (p.covered_amount * (p.baseline_rate - current) / p.baseline_rate).min(p.limit);
+// milestone 1 — the Blend strategy's total_value, through Blend's public interface (2.8)
+let reserve   = BlendPoolClient::new(&env, &pool).get_reserve(&asset);
+let positions = BlendPoolClient::new(&env, &pool).get_positions(&env.current_contract_address());
+let b_tokens  = positions.supply.get(reserve.config.index).unwrap_or(0);
+b_tokens * reserve.data.b_rate / 1_000_000_000_000
 ```
 
-The `Reserve`, `ReserveConfig` and `ReserveData` types in the repository mirror `blend-contracts-v2` field for field. That lets the same adapter read a real Blend pool as easily as the mock used in tests; milestone 1 points it at a Blend V2 pool on testnet.
+The `Reserve`, `ReserveConfig` and `ReserveData` types in `contracts/common` mirror `blend-contracts-v2` field for field, so the same read works against a real Blend pool on testnet.
 
-Four properties of Blend's read surface shape the adapter:
+Four properties of Blend's read surface shape the strategy:
 
-- **Blend does not expose `get_backstop()`.** The pool's public interface is `get_config`, `get_admin`, `get_reserve_list`, `get_reserve`, `get_positions`, `get_reserve_emissions`, `get_user_emissions`, `get_auction`, and a contract cannot read another contract's storage (2.8). The backstop address is therefore recorded in the policy at issuance and verified off-chain against the pool's deployment.
-- **`Positions` is keyed by reserve index, not asset.** `liabilities: Map<u32, i128>` with accessor `get_liabilities(reserve_index)`, so the index is resolved first via `get_reserve(asset).config.index` or `get_reserve_list()`.
-- **These reads are point-in-time.** `Reserve::load()` updates to the current timestamp and auction data scales with elapsed ledgers, so nothing is cached across ledgers except the issuance baseline, which is stored on the policy deliberately.
+- **Blend does not expose `get_backstop()`.** The pool's public interface is `get_config`, `get_admin`, `get_reserve_list`, `get_reserve`, `get_positions`, `get_reserve_emissions`, `get_user_emissions`, `get_auction`, and a contract cannot read another contract's storage (2.8). The backstop address is therefore a strategy parameter verified off-chain against the pool's deployment.
+- **`Positions` is keyed by reserve index, not asset.** `supply: Map<u32, i128>` and `liabilities: Map<u32, i128>`, so the index is resolved first via `get_reserve(asset).config.index` or `get_reserve_list()`.
+- **These reads are point-in-time.** `Reserve::load()` updates to the current timestamp and auction data scales with elapsed ledgers, so nothing is cached across ledgers.
 - **`pool_data` on the backstop calls into the Comet AMM** for total supply and balances, so the Comet contract lands in the footprint of any read that uses it.
 
-We call no state-changing Blend function. Coverage attaches without Blend granting us anything. For accuracy on a related point: Blend V2 bounds borrowing through `max_util` and a per-asset `supply_cap` rather than a per-asset borrow cap, so any risk-parameter scoring we publish names those fields.
+The strategy calls Blend's `submit` to supply and withdraw and nothing else. For accuracy on a related point: Blend V2 bounds borrowing through `max_util` and a per-asset `supply_cap` rather than a per-asset borrow cap, so any risk-parameter scoring we publish names those fields.
 
-**On DeFindex the shape differs and the read path is not free of side effects.** `fetch_total_managed_funds()` returns a per-asset idle-versus-invested breakdown; there is no `total_assets()` and no scalar share price, so the adapter computes NAV from that basket and the vault's `total_supply`. Critically, `get_asset_amounts_per_shares()` internally calls `fetch_total_managed_funds(e, true)`, and that flag — per DeFindex's own comment — "ensures that strategy reports are updated and new fees are locked." Calling it locks fees inside someone else's vault. **We therefore never call it from a permissionless entrypoint.** Even `fetch_total_managed_funds()` bumps the vault's instance TTL, so DeFindex evaluation is a read-write transaction whose footprint includes the vault and its strategy entries and scales with assets × strategies rather than being constant. That cost is disclosed here and priced into those policies rather than discovered by PaltaLabs later.
+**On DeFindex the shape differs and the read path is not free of side effects.** `fetch_total_managed_funds()` returns a per-asset idle-versus-invested breakdown; there is no `total_assets()` and no scalar share price, so a DeFindex strategy computes its value from that basket and the vault's `total_supply`. Critically, `get_asset_amounts_per_shares()` internally calls `fetch_total_managed_funds(e, true)`, and that flag — per DeFindex's own comment — "ensures that strategy reports are updated and new fees are locked." Calling it locks fees inside someone else's vault. **We therefore never call it from a permissionless entrypoint.** Even `fetch_total_managed_funds()` bumps the vault's instance TTL, so a DeFindex valuation is a read-write transaction whose footprint includes the vault and its strategy entries and scales with assets × strategies rather than being constant. That cost is disclosed here and priced into those strategies rather than discovered by PaltaLabs later.
 
-**DeFindex does not implement SEP-56.** SEP-0056 is a Draft (v0.1.2, November 2025) authored by OpenZeppelin and Sentinel specifying a 17-function single-asset `TokenizedVault` trait; DeFindex's `VaultTrait` is multi-asset by construction and implements none of `total_assets`, `convert_to_shares`, `convert_to_assets` or the `preview_*`/`max_*` family. An integration targets DeFindex's own interface. We track SEP-56 for the generic adapter and treat its Draft status as an integration risk rather than a foundation — OpenZeppelin's shipped `FungibleVault` already diverges from the draft's trait naming. SEP-40 is likewise a Draft (v0.1.0), and we treat it the same way.
+**DeFindex does not implement SEP-56.** SEP-0056 is a Draft (v0.1.2, November 2025) authored by OpenZeppelin and Sentinel specifying a 17-function single-asset `TokenizedVault` trait; DeFindex's `VaultTrait` is multi-asset by construction and implements none of `total_assets`, `convert_to_shares`, `convert_to_assets` or the `preview_*`/`max_*` family. An integration targets DeFindex's own interface. We track SEP-56 for the generic strategy and treat its Draft status as an integration risk rather than a foundation — OpenZeppelin's shipped `FungibleVault` already diverges from the draft's trait naming. SEP-40 is likewise a Draft (v0.1.0), and we treat it the same way.
 
 ### 9.2 Oracle-derived triggers, and where they are not available
 
-*Milestone 2.* Price- and NAV-type triggers exist for cases with no equivalent accounting signal. Four conditions must all pass.
+*Milestone 2.* Price- and NAV-type triggers exist for cover on positions with no accounting signal, where the shortfall cannot be read from a vault's books. Four conditions must all pass.
 
 **Two independent feeds must agree.** We read Reflector's Stellar DEX feed and its external CEX/DEX feed and require divergence within `threshold_bps`. Both feeds' entries fit comfortably in one footprint — roughly 48 price records for two 2-hour windows, plus instance and code entries, against `txMaxFootprintEntries` of 400 — and an attacker cannot skip the check by omitting a feed, because touching an entry outside the declared footprint traps. Each feed quotes in its own `base()` with its own `decimals()`, so the adapter normalizes both before comparing, and each asset entry carries its own TTL via `expires(asset)`, which is checked before use.
 
@@ -467,7 +502,7 @@ We call no state-changing Blend function. Coverage attaches without Blend granti
 
 **Staleness is checked.** SEP-40's `PriceData` carries only `price` and `timestamp` — no confidence interval, no round id — so timestamp age against the feed's `resolution()` is the only staleness signal available, and an observation older than a configured bound is not actionable.
 
-**Where the gates are unavailable, no price trigger is offered.** This is the honest and load-bearing case, not a corner case. A tokenized treasury with sub-$1 hourly volume on its only venue will have no Aquarius pool, and Reflector feeds carry an explicit per-asset list, so an asset the external feed does not quote returns `None` rather than a comparison price. Both oracle-side gates then have nothing to work with. The rule is **fail-closed**: where the external feed does not quote the asset, no price- or NAV-type trigger is available and the policy is written on accounting triggers only. Confirming per-asset coverage against `assets()` on the external feed is a milestone-1 task, and it is why 9.1 is the primary path rather than a fallback.
+**Where the gates are unavailable, no price trigger is offered.** This is the honest and load-bearing case, not a corner case. A tokenized treasury with sub-$1 hourly volume on its only venue will have no Aquarius pool, and Reflector feeds carry an explicit per-asset list, so an asset the external feed does not quote returns `None` rather than a comparison price. Both oracle-side gates then have nothing to work with. The rule is **fail-closed**: where the external feed does not quote the asset, no price- or NAV-type trigger is available and cover is written on accounting only. Confirming per-asset coverage against `assets()` on the external feed is a milestone-2 task, and it is why accounting (5.2, 9.1) is the primary path rather than a fallback.
 
 ```rust
 #[contracttype]
@@ -498,51 +533,51 @@ pub trait TriggerModule {
 
 | Threat | Mitigation | Status |
 |---|---|---|
-| Payout redirected, by us or anyone | Beneficiary fixed in the pool at reservation; `settle` takes no recipient; no claims role exists (4.2, 5.3) | Implemented |
-| Payout larger than the cover bought | Pool caps every payout at the reserved limit (4.3) | Implemented |
-| Unauthorized caller reserves, releases or settles | All four policy-facing pool functions require auth from the registered Policy contract (4.2) | Implemented |
-| Pool unable to pay a valid claim | Full collateralisation; capital backing coverage cannot be unstaked (4.3) | Implemented |
-| Capacity over-writing | Reservation atomic with issuance; `coverage_written <= total_capital` (4.3) | Implemented |
+| Payout redirected, by us or anyone | `claim` pays the calling vault against its own cover; no recipient parameter; no claims role exists (4.2) | Implemented |
+| Payout larger than the cover bought | Pool caps every claim at the vault's remaining cover (4.3) | Implemented |
+| Unauthorized caller opens, claims or closes cover | Vault-facing pool functions require the vault's own auth and the admin's whitelist (4.2) | Implemented |
+| A depositor paid more than they are owed | Payout is `max(value, protected)`; principal is reduced pro rata on every withdrawal (5.2) | Implemented |
+| Pool unable to pay a valid claim | Full collateralisation; capital backing cover cannot be unstaked (4.3) | Implemented |
+| Capacity over-writing | Reservation atomic with purchase; `coverage_written <= total_capital` (4.3) | Implemented |
 | Issuer freezes or claws back pool capital | Pool holds native XLM, which has no issuer (6.2) | Implemented |
 | Allowance revoked when a loss looks likely | Custody-lock staking; no `transfer_from` path (4.3) | Implemented |
-| Settlement cost grows with stakers | Loss absorbed by share value; three writes, constant in staker count (7.2) | Implemented |
-| Share price inflated by a direct transfer | Share price computed from internal accounting, not token balance (7.2) | Implemented |
-| Rounding drift | Mint and redeem round down, in the pool's favour (7.2) | Implemented |
-| Oracle manipulation to suppress a valid payout | Payout trigger reads Blend's `b_rate`, not a price (9.1) | Implemented |
-| Staker flight ahead of a known loss | Lock period today; notice period and a claim freeze keyed to pending bad debt (4.4) | Milestone 1 |
-| Oracle manipulation to force a spurious payout | Cross-feed divergence gate, 2-hour time weighting, staleness bound; fail-closed where gates are unavailable (9.2) | Milestone 2 |
-| Position archived when a claim lands | Protocol-23 automatic restore; interactions extend TTL today, keeper in milestone 2 (8) | Partial |
-| Our adapter used to force side effects in a covered vault | Side-effecting vendor functions kept out of permissionless paths (9.1) | Milestone 2 |
-| Cross-contract reentrancy | Blocked by the host (2.9); the pool never calls back into Policy (4.2) | Implemented |
+| Settlement cost grows with stakers | Loss absorbed by share value; four writes, constant in staker count (7.2) | Implemented |
+| Pool share price inflated by a direct transfer | Share price computed from internal accounting, not token balance (7.2) | Implemented |
+| Vault share price inflated by donating to a strategy | Zero-share mints rejected; virtual share offset or minimum first deposit to follow (10.5) | Partial |
+| Rounding drift | Mint, redeem and shortfall maths round down, in the contract's favour; dust operations rejected (4.3, 5.2) | Implemented |
+| Oracle manipulation to suppress or force a payout | The payout reads no price; it is the vault's accounting (5.2) | Implemented |
+| Cross-contract reentrancy | Blocked by the host (2.9); the vault calls out, nothing calls back in (4.2) | Implemented |
+| Staker flight ahead of a known loss | Lock and full collateralisation today; loss reporting and a notice period (4.4) | Milestone 1 |
+| Cover exhausted, later withdrawers unpaid | Cover sized above maximum loss today; pro-rata shortfall accounting (10.5) | Milestone 1 |
+| Curator allocates to a bad strategy | Curator whitelists strategies; depositors trust the curator, as on Morpho; allocation limits (11) | Milestone 2 |
+| Position archived when a withdrawal or claim lands | Protocol-23 automatic restore; interactions extend TTL today, keeper in milestone 2 (8) | Partial |
 | Admin key compromise | 10.3 | Before mainnet |
 
 ### 10.2 Testing
 
-Implemented, and run in CI on every push alongside `cargo fmt`, `cargo clippy -D warnings` and a `wasm32v1-none` release build:
+83 tests, run by `scripts/check.sh` together with `cargo fmt`, `cargo clippy -D warnings` and the `stellar contract build` of every contract; the same steps are in the GitHub Actions workflow.
 
-- **Eleven CoverPool unit tests.** Share minting, the lock period, capital backing coverage being unable to leave, capacity limits, pro-rata premium, pro-rata slashing on payout, a staker joining after a loss not being charged for it, release, the payout cap, and caller authorization.
-- **Three end-to-end tests across all four contracts.**
-  1. A bad-debt event: `b_rate` falls 12%, a third party settles, the vault is paid exactly its loss, both stakers are slashed exactly 6%, and they unstake with their premium.
-  2. A quiet term: the policy expires, capacity is released, and stakers exit with capital plus premium.
-  3. A 1% wobble below the trigger, which does not pay.
+- **34 CoverPool unit tests.** Share minting, the lock boundary, capital backing cover being unable to leave, exact capacity and one over, premium split by shares and not retroactive to late stakers, premium kept by stakers who leave, premium rounding and dust conservation, full and partial claims, three sequential partial claims against a 60/40 pair, two vaults sharing one pool's capacity, a staker leaving between claims, share price after an odd slash, one-unit stakes, the drained pool, and a scripted sequence that checks every invariant in 4.3 after each step.
+- **39 CoveredVault unit tests.** Share minting at par and at a lower NAV, NAV across idle and two strategies, the demo scenario step by step, withdrawals with no loss, a partial loss, a total loss and a profit, partial withdrawals of different sizes sharing a loss pro rata, five depositors through a loss, depositors at different entry prices, a late depositor through two losses in either order, the same depositor depositing twice, interleaved partial and full exits, cover exhaustion leaving state unchanged, stroop-level rounding, zero-share and zero-payout rejection, and a scripted life of the vault that checks the books after every step.
+- **8 MockStrategy unit tests.** Value, withdrawal, the demo's 20% loss, total loss, bounds and authorization.
+- **2 end-to-end tests** across all three contracts: the worked example in 5.3 with every number asserted and every balance reconciled, and the quiet path.
+
+The scenario tests were derived from the Ethereum Catalysis suites (the covered vault wrapper, claim manager, cover pool and premium manager), recomputed for the MVP's simpler rules. The testnet script has run the worked example end to end against the deployed contracts.
 
 Planned for milestone 1:
 
-- property tests on the pool invariants and share arithmetic across randomized sequences
-- the same scenario against a real Blend V2 pool on testnet
-- a replay of the February price path against mocked Reflector feeds, for the milestone-2 oracle triggers
+- property tests on the pool and vault invariants across randomized sequences
+- the same scenario against a real Blend V2 pool on testnet through the Blend strategy
 
 ### 10.3 Admin authority and its limits
 
-In the MVP the admin can do three things:
+The pool admin can whitelist vaults and upgrade the pool. It cannot alter a vault's cover, redirect or block a claim, withdraw staked capital, or change share value other than through a claim.
 
-- register the Policy contract, once
-- upgrade the contracts
-- set `b_rate` on the mock Blend pool, which is a demo harness and not part of the product
+The vault admin is the curator. The curator can whitelist strategies, allocate idle deposits to them, buy and close cover, and upgrade the vault. The curator cannot touch a depositor's principal or shares, block a withdrawal, or take deposits out of the vault other than into a whitelisted strategy. Allocation is the curation role, and depositors trust the curator's judgement about strategies, exactly as depositors in a Morpho vault do; milestone 2 adds per-strategy allocation limits.
 
-Underwriting terms — premium rate, trigger threshold, duration — are fixed when the Policy contract is deployed.
+The mock strategy's admin can simulate a loss. That is a demo harness and not part of the product.
 
-No admin function can alter an issued policy, redirect or block a settlement, withdraw staked capital, or change share value other than through a settled claim. The upgrade path is the admin's one broad power, so before mainnet it moves behind a multisig with a timelock, both published on deployment.
+Underwriting terms — the premium rate and the lock — are fixed when the pool is deployed. The upgrade path is each admin's one broad power, so before mainnet it moves behind a multisig with a timelock, both published on deployment.
 
 ### 10.4 Audit and licensing
 
@@ -550,7 +585,22 @@ Sigma Prime led our Ethereum audits (Core, March 2026; Coverage, April 2026; com
 
 For the Soroban contracts we engage a Soroban-experienced auditor, with scope agreed before implementation completes and remediation closed before mainnet. SCF audit credits cover the cost, and no audit expense appears in the budget. The Soroban contracts are published under Apache-2.0.
 
----
+### 10.5 Known MVP limitations
+
+Each of these is a deliberate simplification of the Ethereum design, documented rather than fixed in the MVP, with the milestone that addresses it.
+
+- **First-come compensation if cover is too small.** Payout at withdrawal means that if total shortfall exceeded the vault's remaining cover, early withdrawers would be made whole and later ones not; a withdrawal whose shortfall exceeds the remaining cover fails outright. The MVP avoids this by sizing cover above the maximum loss. This matches Ethereum, where remaining cover is also first-come at withdrawal. Milestone 1: record the shortfall when a loss is reported and share remaining cover pro rata.
+- **Stakers can exit ahead of an unclaimed loss.** A loss exists as soon as a strategy fails, but stakers are slashed only when a depositor withdraws, so a staker can unstake *excess* capital in between. Capital backing cover cannot leave, so payouts are always funded; the remaining stakers carry more of the loss. Milestone 1: loss reporting (4.4).
+- **No cover expiry and no streaming premium.** The curator pays upfront and cover lasts until `close_cover`. On Ethereum premium streams from depositor principal and is split between a platform fee, a pool fee and the restakers; the MVP has no fee split. Milestone 1.
+- **No curator review gate between claims.** On Ethereum every approved claim requires the curator to approve the next before another loss-making withdrawal succeeds. Milestone 1.
+- **Deductible fixed at zero; no per-depositor loss cap.** Milestone 1 makes both configurable.
+- **Cover can be topped up.** Ethereum policies have a fixed limit; here `open_cover` adds to remaining cover, which is simpler for the demo.
+- **Share inflation by donation is only partly mitigated.** Because principal is protected in full, an attacker who donates XLM to a strategy to inflate the share price could make the pool pay a later depositor's rounding loss. The MVP rejects zero-share mints, which is the classic first step. Milestone 1: virtual share offset or a minimum first deposit, as in the Ethereum wrapper's decimals offset.
+- **A drained vault or pool rejects new money** rather than recovering. Redeploy.
+- **Withdrawals drain strategies in whitelist order**, not pro rata. Milestone 1.
+- **Shares are non-transferable.** By design; a transferable share would need principal to travel with it.
+- **The admin can upgrade the contracts.** Multisig and timelock before mainnet (10.3).
+- **The mock strategy's admin triggers losses.** Demo only.
 
 ## 11. Delivery
 
@@ -561,6 +611,8 @@ Three milestones. The final one is mainnet launch. Every deliverable has a binar
 | 1 | CoverPool and Policy integrated against a real Blend V2 pool on testnet; pending-bad-debt signal with withdrawal notice period and claim freeze; USDC pool alongside XLM; property tests | 31 Jan 2027 |
 | 2 | Oracle trigger module with cross-feed divergence gate and consumer-side time weighting; DeFindex adapter; keeper-funded TTL maintenance; risk-parameter scoring against live Blend pools; STRIDE threat model and monitoring plan; audit engaged with scope frozen | 28 Feb 2027 |
 | 3 | Audit remediation; multisig and timelock on admin; mainnet deployment; one live covered vault with staked capacity; monitoring, SDK and integration docs | 31 Mar 2027 |
+
+> **TODO(founders):** this table still describes the Blend-policy design and must be revised for the covered vault before submission. A proposal is in `docs/PLAN.md` section 9: milestone 1 is the real Blend V2 strategy, loss reporting with pro-rata shortfall accounting, cover expiry and streaming premium, and property tests; milestone 2 is multiple Blend markets with curator allocation limits, keeper TTL maintenance, a USDC vault and pool, the STRIDE threat model and monitoring plan, and the audit engaged; milestone 3 is remediation, multisig and timelock, mainnet, the first live covered vault, and the SDK and docs.
 
 Build starts in the first week of January 2027 and completes within the first quarter.
 
@@ -574,7 +626,7 @@ Notification, information collection and KYB follow the vote, so tranche #0 may 
 
 **The critical path is the audit, not the engineering.** Mainnet by 31 March needs an audit slot, the audit itself and remediation to fit inside March. The audit is therefore engaged during milestone 2 with scope frozen at the end of February. Milestone 3 adds no new contract functionality — only remediation, deployment and the first live vault.
 
-**Milestone 1 starts partly delivered.** The Ethereum implementation of this system is shipped and audited, so the Soroban work is a reimplementation against a known specification rather than a design exercise. And the full happy path is built before this submission: staking, cover issuance, the Blend trigger, pro-rata slashing, premium distribution and unstaking, with tests, CI and a testnet demo. Contract IDs are published with the submission.
+**Milestone 1 starts partly delivered.** The Ethereum implementation of this system is shipped and audited, so the Soroban work is a reimplementation against a known specification rather than a design exercise. And the full happy path is built before this submission: staking, cover purchase, deposits and curator allocation, a strategy loss, payout at withdrawal with pro-rata slashing, premium distribution and unstaking, with 83 tests, a local and CI check, and a testnet demo whose contract IDs are in the README.
 
 ---
 

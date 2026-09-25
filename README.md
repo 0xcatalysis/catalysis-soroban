@@ -1,84 +1,104 @@
 # Catalysis on Soroban
 
-**Underwritten bad-debt coverage for Stellar credit markets.**
+**Covered vaults for Stellar.** An XLM vault whose depositors are insured by a staked XLM pool.
 
-Stakers put XLM into a CoverPool. Vaults and lenders buy cover on their Blend supply positions. When Blend socializes bad debt across a reserve's suppliers, the covered loss is paid out automatically. Anyone can trigger the payout, and every staker is slashed pro rata. No claims committee, no vote, no discretionary compensation.
+Depositors put XLM into a CoveredVault. The curator allocates it to strategies (Blend markets, mocked for now) and buys cover from a CoverPool funded by stakers. If a strategy loses money, a depositor still withdraws in full: the vault claims the shortfall from the pool in the same transaction, and every staker is slashed pro rata. No trigger, no oracle, no claims committee. The payout is the vault's own accounting.
 
-This is the Soroban implementation of [Catalysis](https://catalysis.network), which is live and audited on Ethereum. The full design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Built for Stellar Community Fund #46.
+This is the Soroban implementation of [Catalysis](https://catalysis.network), which is live and audited on Ethereum. The full design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the build plan and known limitations are in [`docs/PLAN.md`](docs/PLAN.md). Built for Stellar Community Fund #46.
 
-> **Status: being rebuilt as a covered vault.** The contracts are being reworked to the design in [`docs/PLAN.md`](docs/PLAN.md): a CoveredVault that pays depositor shortfalls from the CoverPool at withdrawal. The `policy`, `blend_adapter` and `mock_blend_pool` contracts described below have been removed; the text is updated in the docs task at the end of the plan.
->
-> **Status: pre-grant MVP.** The happy path runs end to end in tests and on testnet. The extensions scheduled for the grant milestones are listed in [Scope](#scope). The code is not audited — do not use it with real funds.
+> **Status: pre-grant MVP.** The happy path runs end to end in 83 tests and on Stellar testnet. The extensions scheduled for the grant milestones are listed in [Scope](#scope). The code is not audited. Do not use it with real funds.
 
 ## How it works
 
 ```
- stakers ──stake XLM──►  CoverPool  ◄──reserve limit── Policy ◄──buy cover── vault
-                            │                           │
-                            │                   observe b_rate
-                            │                           ▼
-                            │                     Blend adapter ──get_reserve──► Blend pool
-                            │
-          payout to vault ◄─┘  (anyone calls Policy.settle once b_rate has fallen past the trigger)
+                    deposit / withdraw (paid in full)
+   depositor ─────────────────────────────────────► CoveredVault
+                                                     │   │   ▲
+                                 allocate XLM        │   │   │ claim shortfall
+                        ┌────────────────────────────┘   │   │ (at withdrawal)
+                        ▼                                │   │
+                 Strategy A      Strategy B              │   │
+               ("Blend market")("Blend market")          │   │
+                                                         │   │
+                                    buy_cover / premium  ▼   │
+   stakers ──── stake XLM ─────────────────────────► CoverPool
+                                                   (slashed pro rata on claim)
 ```
+
+The demo scenario, which is also the integration test and the testnet script:
+
+1. Alice stakes 1,000 XLM into the CoverPool.
+2. The curator buys 50 XLM of cover for the vault, paying a 2.5% premium (1.25 XLM) that goes to Alice.
+3. A user deposits 100 XLM. The curator allocates 50 to Market A and 50 to Market B.
+4. Market B fails and loses 20% of its funds (10 XLM). Vault NAV is 90.
+5. The user's position reads value 90, protected 100, shortfall 10.
+6. The user withdraws and receives the full 100 XLM. The pool pays the 10 XLM shortfall. Alice's stake goes from 1,000 to 990 and the vault's cover from 50 to 40.
 
 | Contract | Role |
 |---|---|
-| [`cover_pool`](contracts/cover_pool/src/lib.rs) | Staked capital. Mints shares, reserves capacity for policies, distributes premium through a per-share accumulator, and pays claims by lowering the share value, so every staker is slashed pro rata in a constant number of writes. Fully collateralised: coverage written never exceeds capital, and capital backing live coverage cannot be unstaked. |
-| [`policy`](contracts/policy/src/lib.rs) | Issues cover on a supply position in a Blend reserve. Records the reserve's `b_rate` at issuance, charges premium, and pays `covered_amount × decline` (capped at the limit) once the decline passes the trigger. `settle` and `expire` are permissionless. |
-| [`blend_adapter`](contracts/blend_adapter/src/lib.rs) | Reads a reserve's `b_rate` through Blend V2's public `get_reserve`. Blend socializes bad debt by lowering `b_rate`, so a decline is the on-ledger signature of supplier loss. Read-only. |
-| [`mock_blend_pool`](contracts/mock_blend_pool/src/lib.rs) | **Test and demo harness only.** Same `get_reserve` interface and `Reserve` layout as Blend V2, with a setter to replay a bad-debt event. |
-| [`common`](contracts/common/src/lib.rs) | Cross-contract interfaces and the Blend V2 types, mirrored field-for-field from `blend-capital/blend-contracts-v2`. |
+| [`cover_pool`](contracts/cover_pool/src/lib.rs) | Staked capital. Mints shares, reserves cover for whitelisted vaults, prices and distributes premium through a per-share accumulator, and pays claims by lowering the share value, so every staker is slashed pro rata in a constant number of writes. A vault can claim many times against one cover. Fully collateralised: cover written never exceeds capital, and capital backing live cover cannot be unstaked. |
+| [`covered_vault`](contracts/covered_vault/src/lib.rs) | The vault. Internal non-transferable shares and per-depositor principal. The curator whitelists strategies, allocates idle XLM to them and buys cover. `withdraw` values the shares, pulls liquidity, claims any shortfall against principal from the pool, and pays the depositor in full. A deductible constant exists and is zero. |
+| [`mock_strategy`](contracts/mock_strategy/src/lib.rs) | **Test and demo only.** Stands in for a Blend market. Holds real XLM so a simulated loss really moves tokens out. `simulate_loss(bps)` is admin-only. Milestone 1 replaces it with a strategy that supplies to a real Blend V2 pool. |
+| [`common`](contracts/common/src/lib.rs) | Cross-contract interfaces (the pool and strategies as the vault sees them) and the Blend V2 types, mirrored field for field from `blend-capital/blend-contracts-v2`, for the milestone-1 Blend strategy. |
 
-**Why XLM.** Native XLM has no issuer, so nobody can freeze or claw back the pool's capital. That matters on Stellar, where an issuer's freeze and clawback rights reach balances held by contracts (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §6 and [`data/issuer-flags/`](data/issuer-flags/)). The pool asset is a constructor parameter, so a USDC pool is a redeploy rather than a code change.
+**Why XLM.** Native XLM has no issuer, so nobody can freeze or claw back the pool's capital. That matters on Stellar, where an issuer's freeze and clawback rights reach balances held by contracts (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §6 and [`data/issuer-flags/`](data/issuer-flags/)). The asset is a constructor parameter on both contracts, so a USDC vault and pool is a redeploy rather than a code change.
+
+**Why payout at withdrawal.** It is how Catalysis works on Ethereum, and it needs no trigger and no oracle. A loss in a strategy lowers the vault's NAV; the vault's own books say exactly what each depositor is short. The loss we most want to cover is the one where an oracle has already failed, so the payout depends on nothing but the accounting.
 
 ## Run the tests
 
 ```sh
-cargo test --workspace
+./scripts/check.sh      # fmt, clippy, all tests, WASM build: the same steps as CI
+cargo test --workspace  # tests only
 ```
 
-Unit tests cover staking, locking, capacity reservation, premium sharing, pro-rata slashing, and authorization. [`integration-tests/tests/happy_path.rs`](integration-tests/tests/happy_path.rs) runs all four contracts together:
+Needs Rust stable with the `wasm32v1-none` target and the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) 28 or later.
 
-1. Alice stakes 60,000 XLM and Bob stakes 40,000 XLM.
-2. A vault with 50,000 XLM supplied to Blend buys 20,000 XLM of cover for a 500 XLM premium.
-3. Bad debt is socialized and the reserve's `b_rate` drops 12%.
-4. A third party settles, and the vault receives its 6,000 XLM loss.
-5. Both stakers are slashed exactly 6%, keep their premium, and unstake.
+| Crate | Tests | What they cover |
+|---|---|---|
+| `cover_pool` | 34 | Staking, the lock, capacity, premium split and conservation, partial and sequential claims, two vaults sharing a pool, stakers leaving between claims, rounding, invariants |
+| `covered_vault` | 39 | Share pricing, NAV, the demo scenario, partial and total losses, multiple depositors at different entry prices, sequential losses, interleaved withdrawals, cover exhaustion, rounding, invariants |
+| `mock_strategy` | 8 | Value, withdrawal, simulated loss, bounds, authorization |
+| `integration-tests` | 2 | [`covered_vault_demo.rs`](integration-tests/tests/covered_vault_demo.rs): the six steps above with every number asserted and every balance reconciled, plus the quiet path with no loss |
+
+The scenario tests were derived from the Ethereum Catalysis test suites and recomputed for this MVP's simpler rules.
 
 ## Run the demo on testnet
 
-Needs the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) and `jq`.
+Needs the Stellar CLI and `jq`.
 
 ```sh
-./scripts/demo_testnet.sh                # full run
+./scripts/demo_testnet.sh                # full run, about four minutes
 DEMO_PAUSE=1 ./scripts/demo_testnet.sh   # pause between steps, for recording
 ```
 
-The script builds the contracts, funds five accounts with Friendbot, deploys everything, and runs the same scenario at 1/10 scale. Contract IDs are written to `deployments/testnet.json`.
+The script builds the contracts, funds three accounts with Friendbot (curator, Alice, user), deploys the pool, the vault and two mock strategies, runs the six steps above, and finishes with Alice collecting her premium and unstaking 990 XLM after the lock. Contract IDs are written to [`deployments/testnet.json`](deployments/testnet.json). Stellar resets testnet periodically; re-run the script to redeploy.
 
 ## Testnet deployments
 
+Deployed 25 September 2026.
+
 | Contract | ID |
 |---|---|
-| CoverPool | _pending first deploy_ |
-| Policy | _pending first deploy_ |
-| Blend adapter | _pending first deploy_ |
-| Mock Blend pool | _pending first deploy_ |
+| CoverPool | [`CB3SK2KHIBOKV3WHBMXMJOYQJDSGCXJ6GGFZZN5UZM63K25B5GTBNVIO`](https://stellar.expert/explorer/testnet/contract/CB3SK2KHIBOKV3WHBMXMJOYQJDSGCXJ6GGFZZN5UZM63K25B5GTBNVIO) |
+| CoveredVault | [`CDMDOL3XKEHHUOCX7M7QRLCBH6AULKHGHGTKIQXOW6HSC7GJKLBAU27A`](https://stellar.expert/explorer/testnet/contract/CDMDOL3XKEHHUOCX7M7QRLCBH6AULKHGHGTKIQXOW6HSC7GJKLBAU27A) |
+| MockStrategy A | [`CAVB427ZBHTTDCC7TMKWQZIBDAUQTMEXASF2KAQ7HMB26TM3TCJEH6II`](https://stellar.expert/explorer/testnet/contract/CAVB427ZBHTTDCC7TMKWQZIBDAUQTMEXASF2KAQ7HMB26TM3TCJEH6II) |
+| MockStrategy B | [`CAK4WT6UOXAXLBZRN37X6WHXBEUREQ4G6YDQHJWIGQMUVDUZVBX4WFF6`](https://stellar.expert/explorer/testnet/contract/CAK4WT6UOXAXLBZRN37X6WHXBEUREQ4G6YDQHJWIGQMUVDUZVBX4WFF6) |
 
 ## Scope
 
-Built now (pre-grant MVP): everything above.
+Built now (pre-grant MVP): everything above. Known limitations are listed in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §10.5, each with the milestone that addresses it.
 
 Scheduled for the grant milestones, per [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §11:
 
-- Integration with a real Blend V2 pool on testnet, plus reading pending bad debt from the backstop
-- Withdrawal notice period, and a claim freeze keyed to pending bad debt
-- DeFindex adapter
-- Oracle-derived triggers with a cross-feed divergence gate
+- A real Blend V2 strategy on testnet, valued through `b_rate`
+- Loss reporting at strategy level, with pro-rata shortfall accounting and a staker notice period
+- Cover expiry and streaming premium from vault yield
+- Multiple Blend markets with curator allocation limits
 - Keeper-driven TTL maintenance
-- USDC pools
-- Audit, then mainnet
+- USDC vault and pool
+- Oracle-derived triggers for positions with no accounting signal
+- Audit, multisig and timelock, then mainnet
 
 ## License
 

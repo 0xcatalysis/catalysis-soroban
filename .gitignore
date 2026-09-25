@@ -1,0 +1,6 @@
+/target
+**/test_snapshots/
+# Stellar CLI local config can hold secret keys. Never commit it.
+.stellar/
+.env
+.DS_Store

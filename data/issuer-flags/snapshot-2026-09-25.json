@@ -1,0 +1,106 @@
+{
+  "retrieved_at": "2026-09-25",
+  "source": "https://horizon.stellar.org/accounts/{issuer}",
+  "network": "pubnet",
+  "note": "Issuer authorization flags are account-level: every asset from one issuer shares one flag set. Identity was established by home_domain and the issuer's stellar.toml, never by asset code. Re-run check_issuer_flags.sh to compare against the live ledger.",
+  "issuers": [
+    {
+      "label": "USDC (Circle)",
+      "assets": ["USDC"],
+      "account_id": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+      "home_domain": "circle.com",
+      "flags": { "auth_required": false, "auth_revocable": true, "auth_immutable": false, "auth_clawback_enabled": false },
+      "thresholds": { "low_threshold": 2, "med_threshold": 2, "high_threshold": 2 },
+      "master_key_weight": 0,
+      "signer_count": 4,
+      "tier_a_eligible": true,
+      "tier_b_eligible": false,
+      "reason": "Freezable (auth_revocable). Clawback currently off but can be enabled (auth_immutable false)."
+    },
+    {
+      "label": "EURC (Circle)",
+      "assets": ["EURC"],
+      "account_id": "GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPP2",
+      "home_domain": "circle.com",
+      "flags": { "auth_required": false, "auth_revocable": true, "auth_immutable": false, "auth_clawback_enabled": false },
+      "thresholds": { "low_threshold": 2, "med_threshold": 2, "high_threshold": 2 },
+      "master_key_weight": 0,
+      "signer_count": 4,
+      "tier_a_eligible": true,
+      "tier_b_eligible": false,
+      "reason": "Freezable (auth_revocable)."
+    },
+    {
+      "label": "Etherfuse stablebonds",
+      "assets": ["CETES", "USTRY", "TESOURO", "GILTS", "EUROB", "KTB"],
+      "account_id": "GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC",
+      "home_domain": "etherfuse.com",
+      "flags": { "auth_required": false, "auth_revocable": false, "auth_immutable": false, "auth_clawback_enabled": false },
+      "thresholds": { "low_threshold": 0, "med_threshold": 0, "high_threshold": 0 },
+      "master_key_weight": 1,
+      "signer_count": 1,
+      "tier_a_eligible": false,
+      "tier_b_eligible": false,
+      "reason": "Neither freezable nor clawback-enabled today, but auth_immutable is false and all thresholds are 0 with master weight 1: a single SetOptions signature can enable both."
+    },
+    {
+      "label": "BENJI (Franklin Templeton)",
+      "assets": ["BENJI"],
+      "account_id": "GBHNGLLIE3KWGKCHIKMHJ5HVZHYIK7WTBE4QF5PLAKL4CJGSEU7HZIW5",
+      "home_domain": "www.franklintempleton.com",
+      "flags": { "auth_required": true, "auth_revocable": true, "auth_immutable": false, "auth_clawback_enabled": true },
+      "thresholds": { "low_threshold": 2, "med_threshold": 2, "high_threshold": 6 },
+      "master_key_weight": 0,
+      "signer_count": 14,
+      "tier_a_eligible": false,
+      "tier_b_eligible": false,
+      "reason": "Freezable and clawback-enabled."
+    },
+    {
+      "label": "USDY (Ondo)",
+      "assets": ["USDY"],
+      "account_id": "GAJMPX5NBOG6TQFPQGRABJEEB2YE7RFRLUKJDZAZGAD5GFX4J7TADAZ6",
+      "home_domain": "ondo.finance",
+      "flags": { "auth_required": false, "auth_revocable": true, "auth_immutable": false, "auth_clawback_enabled": true },
+      "thresholds": { "low_threshold": 0, "med_threshold": 0, "high_threshold": 0 },
+      "master_key_weight": 1,
+      "signer_count": 1,
+      "tier_a_eligible": false,
+      "tier_b_eligible": false,
+      "reason": "Freezable and clawback-enabled."
+    },
+    {
+      "label": "YLDS (Figure)",
+      "assets": ["YLDS"],
+      "account_id": "GAC7MOPTQLQUM3KC24AW4GHS3RLF72LPEZO54AH7EZ6TSMGRB5SOAVH3",
+      "home_domain": "www.ylds.com",
+      "flags": { "auth_required": true, "auth_revocable": true, "auth_immutable": false, "auth_clawback_enabled": true },
+      "thresholds": { "low_threshold": 0, "med_threshold": 0, "high_threshold": 0 },
+      "master_key_weight": 1,
+      "signer_count": 1,
+      "tier_a_eligible": false,
+      "tier_b_eligible": false,
+      "reason": "Freezable and clawback-enabled."
+    },
+    {
+      "label": "EURC (Mykobo)",
+      "assets": ["EURC"],
+      "account_id": "GAQRF3UGHBT6JYQZ7YSUYCIYWAF4T2SAA5237Q5LIQYJOHHFAWDXZ7NM",
+      "home_domain": "mykobo.co",
+      "flags": { "auth_required": false, "auth_revocable": false, "auth_immutable": false, "auth_clawback_enabled": false },
+      "thresholds": { "low_threshold": 0, "med_threshold": 0, "high_threshold": 0 },
+      "master_key_weight": 1,
+      "signer_count": 1,
+      "tier_a_eligible": false,
+      "tier_b_eligible": false,
+      "reason": "Neither freezable nor clawback-enabled today, reversible by a single signature. A stablecoin, not an RWA."
+    }
+  ],
+  "unresolved": [
+    "Spiko (EUTBL, USTBL), Realiz, WisdomTree (WTGXX), Paxos (USDP), Centrifuge, BlackRock/Securitize: no classic issuer on Stellar could be attributed to these operators by home_domain and stellar.toml. Several may issue as Soroban contracts, which carry no issuer auth flags; see ARCHITECTURE.md section 12.2.",
+    "Ondo OUSG: Ondo's stellar.toml lists only USDY; all OUSG-coded assets found were on unofficial domains."
+  ],
+  "counterfeits_observed": [
+    { "asset": "USTRY", "account_id": "GB3P5ZNOUFIOBTBSFMTBEDNBR3I3Z7DPM6QNOYVO4K7HNIVOECB2J567", "home_domain": "trendx.pages.dev", "note": "The only asset found with auth_immutable true. Not Etherfuse." }
+  ]
+}

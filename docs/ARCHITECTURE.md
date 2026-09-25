@@ -389,19 +389,9 @@ The integration test replays the demo: Alice's 1,000 XLM stake is slashed exactl
 
 ### 8.1 Testing
 
-83 tests, run by `scripts/check.sh` together with `cargo fmt`, `cargo clippy -D warnings` and the `stellar contract build` of every contract; the same steps are in the GitHub Actions workflow.
+Every contract function is exercised by unit tests against the real neighbouring contracts, and the worked example in 5.3 runs end to end with every number and every balance asserted. The scenarios were derived from the test suites of the audited Ethereum implementation, recomputed for this design: multiple depositors at different entry prices, sequential losses, interleaved partial withdrawals, cover exhaustion, stakers joining and leaving between claims, premium conservation, and rounding at the stroop level. Scripted sequences check the invariants in 4.3 after every step. `scripts/check.sh` runs formatting, lints, the tests and the Wasm build; the same steps run in CI. The testnet script has run the worked example against the deployed contracts.
 
-- **34 CoverPool unit tests.** Share minting, the lock boundary, capital backing cover being unable to leave, exact capacity and one over, premium split by shares and not retroactive to late stakers, premium kept by stakers who leave, premium rounding and dust conservation, full and partial claims, three sequential partial claims against a 60/40 pair, two vaults sharing one pool's capacity, a staker leaving between claims, share price after an odd slash, one-unit stakes, the drained pool, and a scripted sequence that checks every invariant in 4.3 after each step.
-- **39 CoveredVault unit tests.** Share minting at par and at a lower NAV, NAV across idle and two strategies, the demo scenario step by step, withdrawals with no loss, a partial loss, a total loss and a profit, partial withdrawals of different sizes sharing a loss pro rata, five depositors through a loss, depositors at different entry prices, a late depositor through two losses in either order, the same depositor depositing twice, interleaved partial and full exits, cover exhaustion leaving state unchanged, stroop-level rounding, zero-share and zero-payout rejection, and a scripted life of the vault that checks the books after every step.
-- **8 MockStrategy unit tests.** Value, withdrawal, the demo's 20% loss, total loss, bounds and authorization.
-- **2 end-to-end tests** across all three contracts: the worked example in 5.3 with every number asserted and every balance reconciled, and the quiet path.
-
-The scenario tests were derived from the Ethereum Catalysis suites (the covered vault wrapper, claim manager, cover pool and premium manager), recomputed for the MVP's simpler rules. The testnet script has run the worked example end to end against the deployed contracts.
-
-Planned for milestone 1:
-
-- property tests on the pool and vault invariants across randomized sequences
-- the same scenario against a real Blend V2 pool on testnet through the Blend strategy
+Milestone 1 adds property tests over randomized sequences and the same scenario against a real Blend V2 pool on testnet.
 
 ### 8.2 Admin authority and its limits
 

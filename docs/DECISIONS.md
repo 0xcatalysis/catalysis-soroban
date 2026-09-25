@@ -128,6 +128,6 @@ Read this alongside [`ARCHITECTURE.md`](ARCHITECTURE.md) (the design as shipped)
 
 **8.3 Admin authority is stated honestly**, including the curator's power to allocate. Depositors trust the curator's strategy choice, exactly as on Morpho.
 
-**8.4 The milestone table in `ARCHITECTURE.md` §11 is left as the old scope with a marked `TODO(founders)`** and the plan's §9 proposal summarised beneath it. Milestone scope is the founders' call.
+**8.4 The milestone table in `ARCHITECTURE.md` §11 follows the founders' proposal in `PLAN.md` §9**, revised on their instruction after the build. Added a "done when" column with a binary completion test per milestone, because the SCF form asks how each deliverable is measured. USDC moved from milestone 1 to 2 and oracle triggers and DeFindex moved past mainnet to match the proposal; §4.4, §9 and the README were reconciled so no section names a different milestone than the table.
 
 **8.5 Every claim in the docs matches the code.** Where the code lacks something the doc used to claim (a `migrate()` function, a fixed beneficiary), the doc now says so and names the milestone.

@@ -142,14 +142,11 @@ Built now (pre-grant MVP): everything above. Known limitations are listed in [`d
 
 Scheduled for the grant milestones, per [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §11:
 
-- A real Blend V2 strategy on testnet, valued through `b_rate`
-- Loss reporting at strategy level, with pro-rata shortfall accounting and a staker notice period
-- Cover expiry and streaming premium from vault yield
-- Multiple Blend markets with curator allocation limits
-- Keeper-driven TTL maintenance
-- USDC vault and pool
-- Oracle-derived triggers for positions with no accounting signal
-- Audit, multisig and timelock, then mainnet
+- **Milestone 1, 31 Jan 2027:** a real Blend V2 strategy on testnet valued through `b_rate`; loss reporting with pro-rata shortfall accounting and a staker notice period; cover expiry and streaming premium from vault yield; property tests
+- **Milestone 2, 28 Feb 2027:** multiple Blend markets with curator allocation limits; keeper-driven TTL maintenance; USDC vault and pool; STRIDE threat model and monitoring plan; audit engaged
+- **Milestone 3, 31 Mar 2027:** audit remediation; multisig and timelock; mainnet; the first live covered vault; SDK and docs
+
+Oracle-derived triggers and a DeFindex strategy are specified in the architecture doc but follow mainnet.
 
 ## License
 

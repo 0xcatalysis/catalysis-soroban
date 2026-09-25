@@ -237,13 +237,13 @@ unstake leaves total_capital >= coverage_written
 claim amount <= cover.remaining
 ```
 
-### 4.4 Scheduled for milestone 1
+### 4.4 Scheduled for the milestones
 
-The MVP covers the full happy path. Three refinements follow in milestone 1:
+The MVP covers the full happy path. Three refinements follow:
 
-- **Loss reporting.** Today a loss exists as soon as a strategy fails, but stakers are slashed only when a depositor withdraws, so a staker can unstake *excess* capital in between (the capital backing cover cannot leave). The vault will report losses to the pool when they happen, so the slash lands at once and remaining cover is shared pro rata rather than first-come.
-- **A notice period after the lock**, so a withdrawal is announced before it executes.
-- **USDC pools.** The pool asset is already a constructor parameter.
+- **Loss reporting** (milestone 1). Today a loss exists as soon as a strategy fails, but stakers are slashed only when a depositor withdraws, so a staker can unstake *excess* capital in between (the capital backing cover cannot leave). The vault will report losses to the pool when they happen, so the slash lands at once and remaining cover is shared pro rata rather than first-come.
+- **A notice period after the lock** (milestone 1), so a withdrawal is announced before it executes.
+- **USDC pools** (milestone 2). The pool asset is already a constructor parameter.
 
 Fractional collateralisation is not planned for this grant.
 
@@ -452,7 +452,7 @@ Rent pricing is itself a live network parameter rather than a constant — stell
 
 ## 9. Triggers: what is decidable on-ledger
 
-The MVP needs no trigger. The payout condition is the vault's own accounting (5.2): a depositor is paid whatever their shares are worth plus whatever that falls short of their principal. This section covers how the milestone-1 Blend strategy will value its position, which is where Blend's on-ledger state enters the design, and the oracle-derived triggers scheduled for milestone 2 for positions that have no accounting signal.
+The MVP needs no trigger. The payout condition is the vault's own accounting (5.2): a depositor is paid whatever their shares are worth plus whatever that falls short of their principal. This section covers how the milestone-1 Blend strategy will value its position, which is where Blend's on-ledger state enters the design, and the oracle-derived triggers for positions that have no accounting signal, which follow mainnet (11).
 
 ### 9.1 A Blend strategy's value is accounting, not a price
 
@@ -490,7 +490,7 @@ The strategy calls Blend's `submit` to supply and withdraw and nothing else. For
 
 ### 9.2 Oracle-derived triggers, and where they are not available
 
-*Milestone 2.* Price- and NAV-type triggers exist for cover on positions with no accounting signal, where the shortfall cannot be read from a vault's books. Four conditions must all pass.
+*After the grant.* Price- and NAV-type triggers exist for cover on positions with no accounting signal, where the shortfall cannot be read from a vault's books. Four conditions must all pass.
 
 **Two independent feeds must agree.** We read Reflector's Stellar DEX feed and its external CEX/DEX feed and require divergence within `threshold_bps`. Both feeds' entries fit comfortably in one footprint — roughly 48 price records for two 2-hour windows, plus instance and code entries, against `txMaxFootprintEntries` of 400 — and an attacker cannot skip the check by omitting a feed, because touching an entry outside the declared footprint traps. Each feed quotes in its own `base()` with its own `decimals()`, so the adapter normalizes both before comparing, and each asset entry carries its own TTL via `expires(asset)`, which is checked before use.
 
@@ -502,7 +502,7 @@ The strategy calls Blend's `submit` to supply and withdraw and nothing else. For
 
 **Staleness is checked.** SEP-40's `PriceData` carries only `price` and `timestamp` — no confidence interval, no round id — so timestamp age against the feed's `resolution()` is the only staleness signal available, and an observation older than a configured bound is not actionable.
 
-**Where the gates are unavailable, no price trigger is offered.** This is the honest and load-bearing case, not a corner case. A tokenized treasury with sub-$1 hourly volume on its only venue will have no Aquarius pool, and Reflector feeds carry an explicit per-asset list, so an asset the external feed does not quote returns `None` rather than a comparison price. Both oracle-side gates then have nothing to work with. The rule is **fail-closed**: where the external feed does not quote the asset, no price- or NAV-type trigger is available and cover is written on accounting only. Confirming per-asset coverage against `assets()` on the external feed is a milestone-2 task, and it is why accounting (5.2, 9.1) is the primary path rather than a fallback.
+**Where the gates are unavailable, no price trigger is offered.** This is the honest and load-bearing case, not a corner case. A tokenized treasury with sub-$1 hourly volume on its only venue will have no Aquarius pool, and Reflector feeds carry an explicit per-asset list, so an asset the external feed does not quote returns `None` rather than a comparison price. Both oracle-side gates then have nothing to work with. The rule is **fail-closed**: where the external feed does not quote the asset, no price- or NAV-type trigger is available and cover is written on accounting only. Confirming per-asset coverage against `assets()` on the external feed is the first task of that work, and it is why accounting (5.2, 9.1) is the primary path rather than a fallback.
 
 ```rust
 #[contracttype]
@@ -604,15 +604,15 @@ Each of these is a deliberate simplification of the Ethereum design, documented 
 
 ## 11. Delivery
 
-Three milestones. The final one is mainnet launch. Every deliverable has a binary completion test.
+Three milestones. The final one is mainnet launch. Every deliverable has a binary completion test, stated in the third column.
 
-| Milestone | Scope | Target |
-|---|---|---|
-| 1 | CoverPool and Policy integrated against a real Blend V2 pool on testnet; pending-bad-debt signal with withdrawal notice period and claim freeze; USDC pool alongside XLM; property tests | 31 Jan 2027 |
-| 2 | Oracle trigger module with cross-feed divergence gate and consumer-side time weighting; DeFindex adapter; keeper-funded TTL maintenance; risk-parameter scoring against live Blend pools; STRIDE threat model and monitoring plan; audit engaged with scope frozen | 28 Feb 2027 |
-| 3 | Audit remediation; multisig and timelock on admin; mainnet deployment; one live covered vault with staked capacity; monitoring, SDK and integration docs | 31 Mar 2027 |
+| Milestone | Scope | Done when | Target |
+|---|---|---|---|
+| 1 — Real yield, real losses | **Blend V2 strategy** on testnet: supplies and withdraws through Blend's `submit`, values its position through `b_rate` (5.4, 9.1). **Loss reporting** at strategy level: the vault reports a loss to the pool when it happens, the pool records the shortfall, and remaining cover is shared pro rata rather than first-come (4.4, 10.5). **Staker notice period** after the lock. **Cover expiry and streaming premium** charged from vault yield instead of upfront by the curator. **Property tests** on the pool and vault invariants across randomized sequences. | The demo scenario runs on testnet against a live Blend V2 pool, with the loss coming from a real `b_rate` decline rather than a mock. A reported loss slashes stakers before any depositor withdraws. Two depositors with a combined shortfall above the remaining cover are each paid the same fraction. Property tests run in `scripts/check.sh` and CI. | 31 Jan 2027 |
+| 2 — Curation and operations | **Multiple Blend markets** per vault with curator **allocation limits** enforced on-chain (10.3). **Keeper-based TTL maintenance** funded from premium, published so third parties can run it (8). **USDC vault and pool** alongside XLM, with the issuer freeze right disclosed (6.2). **STRIDE threat model and on-chain monitoring plan**, published. **Audit engaged**, contract signed and scope frozen. | A vault on testnet holds positions in two live Blend markets under limits the contract enforces. A keeper has kept every position alive through a full TTL cycle on testnet. The demo runs end to end on a USDC vault and pool. The threat model and monitoring plan are in this repository. The audit firm and start date are named in the tranche report. | 28 Feb 2027 |
+| 3 — Mainnet | **Audit remediation** with the report published. **Multisig and timelock** on every admin function (10.3), with `migrate()` for future upgrades (2.10). **Mainnet deployment.** **First live covered vault** with third-party stake in the pool and cover bought. **SDK and integration docs** for curators and stakers. | All audit findings closed and the report linked from this document. Mainnet contract IDs published, every admin held by the multisig behind the timelock. One covered vault live on mainnet, allocated to a Blend market, with stake from at least one address outside the team and cover open on it. The SDK is published with docs and used by the demo. | 31 Mar 2027 |
 
-> **TODO(founders):** this table still describes the Blend-policy design and must be revised for the covered vault before submission. A proposal is in `docs/PLAN.md` section 9: milestone 1 is the real Blend V2 strategy, loss reporting with pro-rata shortfall accounting, cover expiry and streaming premium, and property tests; milestone 2 is multiple Blend markets with curator allocation limits, keeper TTL maintenance, a USDC vault and pool, the STRIDE threat model and monitoring plan, and the audit engaged; milestone 3 is remediation, multisig and timelock, mainnet, the first live covered vault, and the SDK and docs.
+Oracle-derived triggers (9.2) and a DeFindex strategy (9.1) follow mainnet and are not in this grant's scope. They are specified here because they shape the strategy interface, and because a reviewer should see what the accounting-only design deliberately excludes.
 
 Build starts in the first week of January 2027 and completes within the first quarter.
 

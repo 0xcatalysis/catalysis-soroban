@@ -275,13 +275,13 @@ The doc was written for the Blend-policy design. Update:
 - **§7 loss accounting** — keep. Add that slashing happens at claim time, i.e. at withdrawal.
 - **§9 triggers** — the MVP needs none: the shortfall is the vault's own accounting. Blend `b_rate` becomes how the milestone-1 Blend strategy values its position. Oracle triggers are milestone 2 or later.
 - **§10** — threat table updated; add the section 7 trade-offs.
-- **§11 milestones** — do not change the scope yourself. Leave a clearly marked `TODO(founders)`. The founders are revising milestone scope around the covered vault; a proposal is in section 9 below.
+- **§11 milestones** — revised on the founders' instruction on 25 September 2026 to the scope in section 9 below, with a completion test per milestone.
 
 Keep the doc's existing standard: every factual claim sourced, and nothing claimed that the code does not do.
 
 ---
 
-## 9. Proposed milestone scope (for the founders, not the code session)
+## 9. Milestone scope (adopted into `ARCHITECTURE.md` §11 on 25 September 2026, with completion tests added there)
 
 | Milestone | Scope |
 |---|---|

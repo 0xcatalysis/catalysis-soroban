@@ -183,7 +183,7 @@ fn demo_market_b_fails_and_the_user_is_made_whole() {
         .ledger()
         .with_mut(|l| l.sequence_number += LOCK_LEDGERS);
     assert!(w.pool.try_unstake(&w.alice, &(1_000 * XLM)).is_err()); // 40 still reserved
-    w.pool.close_cover(&w.vault.address);
+    w.vault.close_cover();
     assert_eq!(w.pool.unstake(&w.alice, &(1_000 * XLM)), 990 * XLM);
     assert_eq!(w.xlm.balance(&w.alice), 990 * XLM + 12_500_000);
 }

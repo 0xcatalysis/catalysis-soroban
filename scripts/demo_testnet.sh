@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
-# Catalysis on Soroban — end-to-end happy path on Stellar testnet.
+# Catalysis on Soroban — the covered-vault demo on Stellar testnet.
 #
-#   1. Deploy CoverPool, Policy, Blend adapter and a mock Blend pool
-#   2. Two stakers stake XLM into the pool
-#   3. A vault buys cover on its Blend supply position
-#   4. Bad debt is socialized in Blend (the reserve's b_rate drops 12%)
-#   5. A third party settles: the vault is paid, stakers are slashed pro rata
-#   6. A staker unstakes and claims premium
+# A vault loses money on a strategy, and the depositor still withdraws in full
+# because the insurance pool pays the shortfall at withdrawal. The steps follow
+# docs/PLAN.md section 1, and integration-tests/tests/covered_vault_demo.rs
+# asserts the same numbers off-chain.
+#
+#   0. Alice stakes 1,000 XLM into the CoverPool; the curator buys 50 XLM of
+#      cover for a 2.5% premium (1.25 XLM), which goes to Alice
+#   1-3. A user deposits 100 XLM; the curator allocates 50 to Market A and 50
+#      to Market B (mock strategies standing in for two Blend markets)
+#   4. Market B fails and loses 20% of its funds (10 XLM). Vault NAV 90
+#   5. The user's position: value 90, protected 100, shortfall 10
+#   6-7. The user withdraws and receives the full 100 XLM. The pool pays the
+#      10 XLM shortfall and slashes Alice: stake 1,000 -> 990, cover 50 -> 40
+#   8. Epilogue: Alice collects her premium; the curator closes the cover;
+#      after the lock Alice unstakes 990 XLM
 #
 # Usage:   ./scripts/demo_testnet.sh
 #          DEMO_PAUSE=1 ./scripts/demo_testnet.sh   # wait for Enter between steps (for recording)
-# Needs:   stellar CLI (https://developers.stellar.org/docs/tools/cli), jq
+# Needs:   stellar CLI 28+ (https://developers.stellar.org/docs/tools/cli), jq
+#
+# Stellar resets testnet periodically; re-run this to redeploy.
 set -euo pipefail
 
 NET=testnet
 XLM=10000000                 # stroops per XLM
 LOCK_LEDGERS=12              # ~1 minute, so the demo can show unstaking
-DURATION_LEDGERS=17280       # ~1 day
 PREMIUM_BPS=250              # 2.5% of the limit
-TRIGGER_BPS=500              # pays once the covered rate falls 5%
-RATE_ONE=1000000000000       # 1.0 in Blend's 12-decimal rate precision
 EXPLORER="https://stellar.expert/explorer/testnet"
 OUT=deployments/testnet.json
 WASM=target/wasm32v1-none/release
@@ -30,89 +38,114 @@ step() {
   if [[ "${DEMO_PAUSE:-0}" == "1" ]]; then read -r -p "press Enter to run" _; fi
 }
 xlm() { awk -v s="$1" 'BEGIN { printf "%.2f XLM", s / 10000000 }'; }
+# invoke <contract> <signer> <fn> [--arg value ...]   sends a transaction
+# view   <contract> <fn> [--arg value ...]            simulates only
 invoke() { local id=$1 src=$2; shift 2; stellar contract invoke --id "$id" --source "$src" --network $NET -- "$@"; }
-view()   { local id=$1; shift; stellar contract invoke --id "$id" --source admin --network $NET --send=no -- "$@"; }
+view()   { local id=$1; shift; stellar contract invoke --id "$id" --source curator --network $NET --send=no -- "$@"; }
+num()    { tr -d '"'; }                                  # i128 results come back quoted
+balance() { view "$XLM_SAC" balance --id "$1" | num; }
 
 cd "$(dirname "$0")/.."
 
 # ---------------------------------------------------------------------------
-step "0. Build and fund accounts"
-stellar contract build
-for who in admin alice bob vault keeper; do
+step "0a. Build and fund accounts (curator, alice, user)"
+stellar contract build >/dev/null
+for who in curator alice user; do
   stellar keys address "$who" >/dev/null 2>&1 || stellar keys generate "$who" --network $NET --fund
 done
-ADMIN=$(stellar keys address admin);  ALICE=$(stellar keys address alice)
-BOB=$(stellar keys address bob);      VAULT=$(stellar keys address vault)
+CURATOR=$(stellar keys address curator)
+ALICE=$(stellar keys address alice)
+USER=$(stellar keys address user)
 XLM_SAC=$(stellar contract id asset --asset native --network $NET)
+echo "curator: $CURATOR"
+echo "alice:   $ALICE"
+echo "user:    $USER"
 echo "native XLM contract: $XLM_SAC"
 
 # ---------------------------------------------------------------------------
-step "1. Deploy contracts"
-BLEND=$(stellar contract deploy --wasm $WASM/mock_blend_pool.wasm --source admin --network $NET \
-  -- --admin "$ADMIN")
-ADAPTER=$(stellar contract deploy --wasm $WASM/blend_adapter.wasm --source admin --network $NET)
-POOL=$(stellar contract deploy --wasm $WASM/cover_pool.wasm --source admin --network $NET \
-  -- --admin "$ADMIN" --asset "$XLM_SAC" --lock_ledgers $LOCK_LEDGERS)
-POLICY=$(stellar contract deploy --wasm $WASM/policy.wasm --source admin --network $NET \
-  -- --admin "$ADMIN" --pool "$POOL" --adapter "$ADAPTER" \
-     --premium_bps $PREMIUM_BPS --trigger_bps $TRIGGER_BPS --duration_ledgers $DURATION_LEDGERS)
-invoke "$POOL" admin set_policy_contract --policy_contract "$POLICY"
-
-# The covered Blend reserve. Any address works as the key in the mock pool;
-# we use the native XLM contract so the demo reads as "XLM supplied to Blend".
-RESERVE_ASSET=$XLM_SAC
+step "0b. Deploy: CoverPool, CoveredVault, Market A, Market B"
+POOL=$(stellar contract deploy --wasm $WASM/cover_pool.wasm --source curator --network $NET \
+  -- --admin "$CURATOR" --asset "$XLM_SAC" --lock_ledgers $LOCK_LEDGERS --premium_bps $PREMIUM_BPS)
+VAULT=$(stellar contract deploy --wasm $WASM/covered_vault.wasm --source curator --network $NET \
+  -- --admin "$CURATOR" --asset "$XLM_SAC" --cover_pool "$POOL")
+MARKET_A=$(stellar contract deploy --wasm $WASM/mock_strategy.wasm --source curator --network $NET \
+  -- --admin "$CURATOR" --vault "$VAULT" --asset "$XLM_SAC")
+MARKET_B=$(stellar contract deploy --wasm $WASM/mock_strategy.wasm --source curator --network $NET \
+  -- --admin "$CURATOR" --vault "$VAULT" --asset "$XLM_SAC")
+invoke "$POOL"  curator add_vault    --vault    "$VAULT"    >/dev/null
+invoke "$VAULT" curator add_strategy --strategy "$MARKET_A" >/dev/null
+invoke "$VAULT" curator add_strategy --strategy "$MARKET_B" >/dev/null
 
 mkdir -p deployments
-jq -n --arg pool "$POOL" --arg policy "$POLICY" --arg adapter "$ADAPTER" \
-      --arg blend "$BLEND" --arg xlm "$XLM_SAC" \
-  '{network:"testnet", cover_pool:$pool, policy:$policy, blend_adapter:$adapter,
-    mock_blend_pool:$blend, native_xlm:$xlm}' > $OUT
+jq -n --arg pool "$POOL" --arg vault "$VAULT" --arg a "$MARKET_A" --arg b "$MARKET_B" \
+      --arg xlm "$XLM_SAC" --arg curator "$CURATOR" --arg alice "$ALICE" --arg user "$USER" \
+  '{network:"testnet", cover_pool:$pool, covered_vault:$vault,
+    mock_strategy_a:$a, mock_strategy_b:$b, native_xlm:$xlm,
+    accounts:{curator:$curator, alice:$alice, user:$user}}' > $OUT
 cat $OUT
-echo "CoverPool:  $EXPLORER/contract/$POOL"
-echo "Policy:     $EXPLORER/contract/$POLICY"
+echo "CoverPool:     $EXPLORER/contract/$POOL"
+echo "CoveredVault:  $EXPLORER/contract/$VAULT"
 
 # ---------------------------------------------------------------------------
-step "2. Stakers commit capital: Alice 6,000 XLM, Bob 4,000 XLM"
-invoke "$POOL" alice stake --from "$ALICE" --amount $((6000 * XLM))
-invoke "$POOL" bob   stake --from "$BOB"   --amount $((4000 * XLM))
-view "$POOL" state
+step "0c. Alice stakes 1,000 XLM into the CoverPool"
+invoke "$POOL" alice stake --from "$ALICE" --amount $((1000 * XLM)) >/dev/null
+echo "pool state:"; view "$POOL" state
 
 # ---------------------------------------------------------------------------
-step "3. Vault with 5,000 XLM supplied to Blend buys 2,000 XLM of cover"
-POLICY_ID=$(invoke "$POLICY" vault issue --buyer "$VAULT" --beneficiary "$VAULT" \
-  --target "$BLEND" --asset "$RESERVE_ASSET" \
-  --covered_amount $((5000 * XLM)) --limit $((2000 * XLM)))
-echo "policy id: $POLICY_ID"
-view "$POLICY" get --policy_id "$POLICY_ID"
-echo "Alice's position:"; view "$POOL" position --staker "$ALICE"
+step "0d. The curator buys 50 XLM of cover for the vault (2.5% premium = 1.25 XLM)"
+PREMIUM=$(invoke "$VAULT" curator buy_cover --limit $((50 * XLM)) | num)
+echo "premium paid:      $(xlm "$PREMIUM")"
+echo "vault's cover:";  view "$POOL" cover --vault "$VAULT"
+echo "Alice's position (premium is hers):"; view "$POOL" position --staker "$ALICE"
 
 # ---------------------------------------------------------------------------
-step "4. Bad debt socialized in Blend: reserve b_rate falls 12%"
-invoke "$BLEND" admin set_b_rate --asset "$RESERVE_ASSET" --b_rate $((RATE_ONE * 88 / 100))
-view "$POLICY" check --policy_id "$POLICY_ID"
+step "1-3. The user deposits 100 XLM; the curator allocates 50 to Market A and 50 to Market B"
+invoke "$VAULT" user    deposit  --from "$USER" --amount $((100 * XLM)) >/dev/null
+invoke "$VAULT" curator allocate --strategy "$MARKET_A" --amount $((50 * XLM)) >/dev/null
+invoke "$VAULT" curator allocate --strategy "$MARKET_B" --amount $((50 * XLM)) >/dev/null
+echo "vault NAV:         $(xlm "$(view "$VAULT" nav | num)")"
+echo "Market A:          $(xlm "$(view "$MARKET_A" total_value | num)")"
+echo "Market B:          $(xlm "$(view "$MARKET_B" total_value | num)")"
 
 # ---------------------------------------------------------------------------
-step "5. A third party settles — no claims process, no vote"
-VAULT_BEFORE=$(stellar contract invoke --id "$XLM_SAC" --source admin --network $NET --send=no \
-  -- balance --id "$VAULT" | tr -d '"')
-PAYOUT=$(invoke "$POLICY" keeper settle --policy_id "$POLICY_ID" | tr -d '"')
-VAULT_AFTER=$(stellar contract invoke --id "$XLM_SAC" --source admin --network $NET --send=no \
-  -- balance --id "$VAULT" | tr -d '"')
-echo "payout:            $(xlm "$PAYOUT")"
-echo "vault received:    $(xlm $((VAULT_AFTER - VAULT_BEFORE)))"
-echo "pool after:";      view "$POOL" state
-echo "Alice (60%):";     view "$POOL" position --staker "$ALICE"
-echo "Bob (40%):";       view "$POOL" position --staker "$BOB"
+step "4. Market B fails and loses 20% of its funds (10 XLM)"
+LOST=$(invoke "$MARKET_B" curator simulate_loss --bps 2000 | num)
+echo "Market B lost:     $(xlm "$LOST")"
+echo "Market B now:      $(xlm "$(view "$MARKET_B" total_value | num)")"
+echo "vault NAV:         $(xlm "$(view "$VAULT" nav | num)")"
 
 # ---------------------------------------------------------------------------
-step "6. After the lock, Alice unstakes and claims premium"
+step "5. The user checks their position: value 90, protected 100, shortfall 10"
+POS=$(view "$VAULT" position --depositor "$USER")
+echo "$POS"
+echo "value:             $(xlm "$(echo "$POS" | jq -r .value)")"
+echo "protected:         $(xlm "$(echo "$POS" | jq -r .principal)")"
+echo "shortfall:         $(xlm "$(echo "$POS" | jq -r .shortfall)")"
+
+# ---------------------------------------------------------------------------
+step "6-7. The user withdraws. The pool pays the shortfall and Alice is slashed"
+USER_BEFORE=$(balance "$USER")
+SHARES=$(echo "$POS" | jq -r .shares)
+PAID=$(invoke "$VAULT" user withdraw --from "$USER" --shares "$SHARES" | num)
+USER_AFTER=$(balance "$USER")
+echo "user was paid:     $(xlm "$PAID")   (balance +$(xlm $((USER_AFTER - USER_BEFORE))), minus tx fees)"
+echo "vault's cover:";   view "$POOL" cover --vault "$VAULT"
+echo "pool state:";      view "$POOL" state
+echo "Alice's position (1,000 -> 990):"; view "$POOL" position --staker "$ALICE"
+echo "Market A:          $(xlm "$(view "$MARKET_A" total_value | num)")"
+echo "Market B:          $(xlm "$(view "$MARKET_B" total_value | num)")"
+
+# ---------------------------------------------------------------------------
+step "8. Epilogue: Alice collects her premium; the curator closes the cover; Alice unstakes"
+PREM=$(invoke "$POOL" alice claim_premium --from "$ALICE" | num)
+echo "Alice's premium:   $(xlm "$PREM")"
+invoke "$VAULT" curator close_cover >/dev/null
 echo "waiting ~70s for the $LOCK_LEDGERS-ledger lock to pass..."
 sleep 70
-SHARES=$(view "$POOL" position --staker "$ALICE" | jq -r '.shares')
-OUT_AMT=$(invoke "$POOL" alice unstake --from "$ALICE" --shares "$SHARES" | tr -d '"')
-PREM=$(invoke "$POOL" alice claim_premium --from "$ALICE" | tr -d '"')
+ASHARES=$(view "$POOL" position --staker "$ALICE" | jq -r .shares)
+OUT_AMT=$(invoke "$POOL" alice unstake --from "$ALICE" --shares "$ASHARES" | num)
 echo "Alice unstaked:    $(xlm "$OUT_AMT")"
-echo "Alice's premium:   $(xlm "$PREM")"
 
 bold "Done. Contract IDs are in $OUT"
-echo "CoverPool events:  $EXPLORER/contract/$POOL"
+echo "CoverPool:     $EXPLORER/contract/$POOL"
+echo "CoveredVault:  $EXPLORER/contract/$VAULT"

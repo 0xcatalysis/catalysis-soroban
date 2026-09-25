@@ -93,6 +93,10 @@ pub enum Error {
     StrategyAlreadyAdded = 5,
     InsufficientIdle = 6,
     InsufficientLiquidity = 7,
+    /// The deposit is too small to buy a single share at the current NAV.
+    ZeroShares = 8,
+    /// Shares exist but the vault is worth nothing, so they cannot be priced.
+    VaultDrained = 9,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +114,9 @@ pub struct CoverBought {
     pub limit: i128,
     pub premium: i128,
 }
+
+#[contractevent]
+pub struct CoverClosed {}
 
 #[contractevent]
 pub struct Deposited {
@@ -192,6 +199,16 @@ impl CoveredVault {
         premium
     }
 
+    /// Releases whatever of this vault's cover remains unclaimed. Admin only.
+    /// The pool requires the vault's own signature, which is implicit on this
+    /// direct call; a plain account cannot call the pool for the vault.
+    pub fn close_cover(env: Env) {
+        let cfg = config(&env);
+        cfg.admin.require_auth();
+        CoverPoolClient::new(&env, &cfg.cover_pool).close_cover(&env.current_contract_address());
+        CoverClosed {}.publish(&env);
+    }
+
     /// Moves `amount` of idle asset into a whitelisted strategy. Admin only.
     /// The vault is the direct invoker of the token, so no extra auth is
     /// needed for the transfer.
@@ -235,8 +252,15 @@ impl CoveredVault {
         let shares = if st.total_shares == 0 {
             amount
         } else {
-            amount * st.total_shares / nav(&env, &st) // rounds down, vault's favour
+            let nav = nav(&env, &st);
+            if nav == 0 {
+                panic_with_error!(&env, Error::VaultDrained);
+            }
+            amount * st.total_shares / nav // rounds down, vault's favour
         };
+        if shares == 0 {
+            panic_with_error!(&env, Error::ZeroShares);
+        }
 
         token::Client::new(&env, &cfg.asset).transfer(
             &from,
@@ -278,6 +302,11 @@ impl CoveredVault {
         let protected = pos.principal * shares / pos.shares; // rounds down
         let shortfall = (protected - value).max(0);
         let claimable = shortfall - shortfall * DEDUCTIBLE_BPS / BPS;
+        let paid = value + claimable;
+        if paid == 0 {
+            // Dust: the shares are worth nothing and protect nothing.
+            panic_with_error!(&env, Error::InvalidAmount);
+        }
 
         // 2. Bring `value` of liquidity into the vault: idle first, then the
         //    strategies in whitelist order.
@@ -313,7 +342,6 @@ impl CoveredVault {
         save_position(&env, &from, &pos);
         save_state(&env, &st);
 
-        let paid = value + claimable;
         token::Client::new(&env, &cfg.asset).transfer(
             &env.current_contract_address(),
             &from,

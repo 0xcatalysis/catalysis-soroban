@@ -212,7 +212,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 - `covered_vault_demo.rs`: the section 1 table, asserting every number
 - a quiet-path test: no loss, exact withdrawal, no slashing
 
-**Task 6 — Rewrite `scripts/demo_testnet.sh`** to run the section 1 scenario on testnet.
+**Task 6 — Rewrite `scripts/demo_testnet.sh`** to run the section 1 scenario on testnet. ✅ done 25 September 2026: verified end to end on testnet three times (the first run found that `close_cover` had to go through the vault; the last run deployed the final WASMs, IDs in `deployments/testnet.json`).
 - Keep the `DEMO_PAUSE=1` step mode and the plain-English printouts.
 - Print the user's `position` before withdrawal (value 90 / protected 100) and the balances after (user +100, Alice's stake 990).
 - Write contract IDs to `deployments/testnet.json`.
@@ -242,13 +242,15 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 
 These go in ARCHITECTURE §10 as "known MVP limitations, addressed in milestone 1".
 
-- **First-come compensation if cover is too small.** Payout at withdrawal means that if total shortfall exceeded the vault's remaining cover, early withdrawers would be made whole and later ones not. The MVP avoids this by sizing cover above the maximum loss. Milestone 1: record the shortfall when a loss is reported, and share remaining cover pro rata.
+- **First-come compensation if cover is too small.** Payout at withdrawal means that if total shortfall exceeded the vault's remaining cover, early withdrawers would be made whole and later ones not. A withdrawal whose shortfall exceeds the remaining cover fails outright (the pool's claim errors and the whole call reverts); the depositor can withdraw a smaller number of shares whose shortfall fits, or wait for the curator to top up cover. This matches Ethereum, where remaining cover is also first-come at withdrawal. The MVP avoids this by sizing cover above the maximum loss. Milestone 1: record the shortfall when a loss is reported, and share remaining cover pro rata.
 - **Stakers can exit ahead of an unclaimed loss.** A loss exists as soon as a strategy fails, but stakers are only slashed when a depositor withdraws. A staker can unstake *excess* capital in between. The capital backing the vault's cover cannot leave, so payouts are always funded; the remaining stakers just carry more of the loss. Milestone 1: vault reports losses to the pool when they happen.
 - **No cover expiry or streaming premium.** The curator pays upfront; cover lasts until `close_cover`. On Ethereum, premium streams from depositor principal per second and is split between a platform fee, a pool fee and the restakers (`PremiumManager.distributePremium`). The MVP has no fee split: 100% of the premium goes to stakers.
 - **No curator review gate between claims.** On Ethereum, every approved claim sets `claimApprovalRequired` and the curator must call `approveNextClaim` before the next loss-making withdrawal succeeds. The MVP lets the vault claim repeatedly without review.
 - **Deductible hardcoded to zero; no per-depositor loss cap.** The Ethereum `CoveredVaultWrapper` caps a claim at `maxCoverableLossBps` of the depositor's basis and subtracts `deductibleBps` before filing. The MVP keeps a `DEDUCTIBLE_BPS` constant in the vault set to zero and has no loss cap, so it pays the full shortfall.
 - **Cover cannot be topped up on Ethereum; it can here.** Ethereum policies have a fixed `coverageLimit` and need a new policy for more cover. The MVP's `open_cover` adds to the vault's remaining cover, which is simpler for the demo.
-- **Total loss of a strategy is not handled.** If NAV reaches zero with shares outstanding, `deposit` divides by zero. Cover is sized so the demo never gets there.
+- **A drained vault or pool rejects new money.** If NAV reaches zero with shares outstanding, `deposit` fails with `VaultDrained`; likewise `stake` fails with `PoolDrained` once a pool has been slashed to zero. Neither can be recovered in the MVP; redeploy.
+- **Dust-sized operations are rejected, not rounded.** A deposit that would mint zero shares fails (`ZeroShares`), and a withdrawal or unstake that would pay zero fails (`InvalidAmount`). Rounding elsewhere is down, in the contract's favour.
+- **Share inflation by donation is only partly mitigated.** Because principal is protected in full, an attacker who donates XLM to a strategy to inflate the share price could make the pool pay a later depositor's rounding loss. The MVP only rejects zero-share mints (the classic first step). Milestone 1: virtual share offset or a minimum first deposit, as in the Ethereum wrapper's decimals offset.
 - **The admin triggers losses in the mock strategies.** Demo only.
 - **Shares are non-transferable.**
 - **The admin can upgrade the contracts.** Multisig and timelock before mainnet.

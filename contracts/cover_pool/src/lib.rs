@@ -110,6 +110,9 @@ pub enum Error {
     NoCover = 8,
     ClaimExceedsCover = 9,
     VaultAlreadyAdded = 10,
+    /// Shares exist but capital is zero: the pool was fully slashed, so
+    /// no share price exists to mint at.
+    PoolDrained = 11,
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +219,9 @@ impl CoverPool {
         }
         let cfg = config(&env);
         let mut st = state(&env);
+        if st.total_shares > 0 && st.total_capital == 0 {
+            panic_with_error!(&env, Error::PoolDrained);
+        }
 
         // Custody-lock: capital moves into the pool's own balance.
         token::Client::new(&env, &cfg.asset).transfer(
@@ -265,6 +271,9 @@ impl CoverPool {
         }
 
         let amount = shares * st.total_capital / st.total_shares; // rounds down
+        if amount == 0 {
+            panic_with_error!(&env, Error::InvalidAmount);
+        }
         if st.total_capital - amount < st.coverage_written {
             panic_with_error!(&env, Error::CapitalBackingCoverage);
         }

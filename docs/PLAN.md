@@ -14,6 +14,7 @@ The exact scenario, which is also the integration test and the testnet demo scri
 
 | # | Step | On-chain effect |
 |---|---|---|
+| 0 | Deploy the CoverPool, then the CoveredVault pointing at it; the pool admin whitelists the vault with `add_vault` | Setup |
 | 0 | Alice stakes 1,000 XLM into the CoverPool | Pool capital 1,000 |
 | 0 | Vault curator buys 50 XLM of cover for the vault, paying a 2.5% premium (1.25 XLM) | Pool reserves 50 for the vault; premium goes to Alice |
 | 1 | The vault accepts XLM deposits | — |
@@ -43,7 +44,7 @@ Plus a quiet-path test: no loss, user withdraws exactly what they put in, no cla
 
 ## 3. Current repo state
 
-The repo is at `stellar/catalysis-soroban`, with one commit: 14 tests passing, fmt clean, clippy clean. It was built in an environment that could not build WASM or reach testnet, so **neither has been verified yet** — that is the first job.
+The repo is at `stellar/catalysis-soroban`, with two commits: 14 tests passing, fmt clean, clippy clean. It was built in an environment that could not build WASM or reach testnet. **Verified 25 September 2026 (Task 0):** fmt, clippy, the 14 tests and `stellar contract build` all pass locally with Rust 1.98.1 and Stellar CLI 28.0.0. Testnet is still unverified; that is Task 6.
 
 | Crate | Now | Action |
 |---|---|---|
@@ -96,15 +97,16 @@ fn open_cover(env, vault: Address, payer: Address, limit: i128) -> i128;
     // reserve `limit` (coverage_written += limit, must stay <= total_capital);
     // charge premium = limit * premium_bps / 10_000, pulled from `payer` into the pool;
     // credit it to stakers via premium_index; returns the premium.
-    // One cover per vault; calling again adds to the limit.
+    // One cover per vault; calling again adds to `remaining`.
 fn claim(env, vault: Address, amount: i128) -> i128;
-    // amount <= remaining limit;
-    // total_capital -= amount; coverage_written -= amount; cover.limit -= amount;
+    // amount <= cover.remaining;
+    // total_capital -= amount; coverage_written -= amount;
+    // cover.remaining -= amount; cover.claimed += amount;
     // transfer `amount` to the vault; emit Slashed.
     // This is the slashing moment: every staker's share value falls pro rata.
-fn close_cover(env, vault: Address);                        // releases the remaining limit
+fn close_cover(env, vault: Address);                        // releases `remaining`
 
-fn cover(env, vault: Address) -> Cover;                     // view: { limit, claimed }
+fn cover(env, vault: Address) -> Cover;                     // view: { remaining, claimed }
 ```
 
 Delete `set_policy_contract`, `reserve`, `release`, `accrue_premium`, `settle_claim` and the `Reservation` type. Update the unit tests: keep the staking ones, and rewrite the policy-facing ones against the new API.
@@ -152,6 +154,8 @@ Notes for the implementer:
 - Shares are internal and non-transferable in the MVP, which is what makes per-address principal tracking correct.
 - A depositor who arrives after a loss deposits at the lower NAV, so their principal equals their value and they have no shortfall. Principal tracking handles this automatically.
 - Call order inside `withdraw`: compute `value` from NAV **before** pulling liquidity out of the strategies.
+- `idle` is stored state, not the vault's live token balance. The shortfall claimed from the pool passes through the vault's balance on its way to the user; do **not** add it to `idle`.
+- If a strategy loses everything, NAV can be zero while shares are outstanding and the deposit formula divides by zero. Happy path: do not handle it; it is listed in section 7.
 
 ### 4.3 MockStrategy (new) — TEST AND DEMO ONLY
 
@@ -178,27 +182,29 @@ Deposits need no function: the vault transfers XLM straight to the strategy's ad
 
 Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` all passing.
 
-**Task 0 — Verify the toolchain (do this first).**
-- `rustup target add wasm32v1-none`
-- Install the Stellar CLI
+**Task 0 — Install and verify the toolchain (do this first).**
+- The founders' Mac has no Rust toolchain at all (checked 25 September 2026): no `rustup`, `cargo` or Stellar CLI. Only `jq` is present.
+- Install rustup with the stable toolchain, then `rustup target add wasm32v1-none`
+- Install the Stellar CLI (`brew install stellar-cli` or `cargo install --locked stellar-cli`)
 - `cargo test --workspace`: the existing 14 tests should pass
 - `stellar contract build`: confirm the WASMs build
 - Report any problem before changing code
 
-**Task 1 — CoverPool API change** (section 4.1). Update its unit tests.
-- Must include a test that three sequential partial claims reduce the limit and slash stakers correctly.
+**Task 1 — Delete** `policy`, `blend_adapter` and `mock_blend_pool`, and the old Blend-policy integration test. Update the workspace members, the `integration-tests` dev-dependencies, and the interfaces in `common` (keep the Blend types). Update the WASM build step in `.github/workflows/ci.yml`, which names the contract crates explicitly, to `cover-pool`, `covered-vault` and `mock-strategy` (add the last two as their crates land).
+- This comes first so that every later task can end with the whole workspace green. Changing the pool API while `policy` still calls the old interface would leave the workspace broken until the rewrite.
 
-**Task 2 — MockStrategy** (section 4.3), with unit tests.
+**Task 2 — CoverPool API change** (section 4.1). Update its unit tests.
+- Must include a test that three sequential partial claims reduce `remaining` and slash stakers correctly.
 
-**Task 3 — CoveredVault** (section 4.2), with unit tests covering:
+**Task 3 — MockStrategy** (section 4.3), with unit tests.
+
+**Task 4 — CoveredVault** (section 4.2), with unit tests covering:
 - deposit and share minting
 - NAV across idle plus two strategies
 - withdraw with no loss (no claim)
 - withdraw with a loss (claim made, user paid in full)
 - a late depositor after a loss has no shortfall
 - a partial withdrawal claims a proportional shortfall
-
-**Task 4 — Delete** `policy`, `blend_adapter` and `mock_blend_pool`. Update the workspace members and the interfaces in `common`; keep the Blend types.
 
 **Task 5 — Integration tests** in `integration-tests/tests/`:
 - `covered_vault_demo.rs`: the section 1 table, asserting every number
@@ -234,6 +240,7 @@ These go in ARCHITECTURE §10 as "known MVP limitations, addressed in milestone 
 - **First-come compensation if cover is too small.** Payout at withdrawal means that if total shortfall exceeded the vault's remaining cover, early withdrawers would be made whole and later ones not. The MVP avoids this by sizing cover above the maximum loss. Milestone 1: record the shortfall when a loss is reported, and share remaining cover pro rata.
 - **Stakers can exit ahead of an unclaimed loss.** A loss exists as soon as a strategy fails, but stakers are only slashed when a depositor withdraws. A staker can unstake *excess* capital in between. The capital backing the vault's cover cannot leave, so payouts are always funded; the remaining stakers just carry more of the loss. Milestone 1: vault reports losses to the pool when they happen.
 - **No cover expiry or streaming premium.** The curator pays upfront; cover lasts until `close_cover`.
+- **Total loss of a strategy is not handled.** If NAV reaches zero with shares outstanding, `deposit` divides by zero. Cover is sized so the demo never gets there.
 - **The admin triggers losses in the mock strategies.** Demo only.
 - **Shares are non-transferable.**
 - **The admin can upgrade the contracts.** Multisig and timelock before mainnet.

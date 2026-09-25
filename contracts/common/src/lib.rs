@@ -12,39 +12,39 @@ use soroban_sdk::{contractclient, contracttype, Address, Env};
 pub const BPS: i128 = 10_000;
 
 // ---------------------------------------------------------------------------
-// CoverPool, as seen by the Policy contract
+// CoverPool, as seen by the CoveredVault
 // ---------------------------------------------------------------------------
 
 #[contractclient(name = "CoverPoolClient")]
 pub trait CoverPoolInterface {
-    /// Capital not yet committed to any policy.
-    fn available_capacity(env: Env) -> i128;
-    /// Locks `limit` of pool capital behind `policy_id`, payable to `beneficiary`.
-    fn reserve(env: Env, policy_id: u64, limit: i128, beneficiary: Address);
-    /// Returns a policy's reserved capacity to the pool (policy expired).
-    fn release(env: Env, policy_id: u64);
-    /// Pulls `amount` of premium from `from` and credits it to stakers.
-    fn accrue_premium(env: Env, policy_id: u64, from: Address, amount: i128);
-    /// Pays `payout` to the beneficiary recorded at reservation.
-    fn settle_claim(env: Env, policy_id: u64, payout: i128) -> i128;
+    /// Reserves `limit` of pool capital for `vault` and pulls the premium
+    /// from `payer`. Calling again for the same vault adds to the reservation.
+    /// Returns the premium charged.
+    fn open_cover(env: Env, vault: Address, payer: Address, limit: i128) -> i128;
+    /// Pays `amount` of the vault's remaining cover to the vault, slashing
+    /// every staker pro rata. Returns the amount paid.
+    fn claim(env: Env, vault: Address, amount: i128) -> i128;
+    /// Releases whatever of the vault's cover remains unclaimed.
+    fn close_cover(env: Env, vault: Address);
 }
 
 // ---------------------------------------------------------------------------
-// Observation adapters, as seen by the Policy contract
+// Strategies, as seen by the CoveredVault
 // ---------------------------------------------------------------------------
 
-#[contractclient(name = "AdapterClient")]
-pub trait AdapterInterface {
-    /// Returns the covered position's value rate. For Blend this is the
-    /// reserve's `b_rate` (12 decimals): it falls when bad debt is socialized
-    /// across suppliers.
-    fn observe(env: Env, target: Address, asset: Address) -> i128;
+#[contractclient(name = "StrategyClient")]
+pub trait StrategyInterface {
+    /// Current value of the strategy's position, in the vault asset.
+    fn total_value(env: Env) -> i128;
+    /// Moves `amount` of the vault asset back to the vault.
+    fn withdraw(env: Env, amount: i128);
 }
 
 // ---------------------------------------------------------------------------
 // Blend V2 pool types, mirrored field-for-field from
 // blend-capital/blend-contracts-v2 (pool/src/storage.rs, pool/src/pool/reserve.rs)
-// so the adapter can read a real Blend pool through its public `get_reserve`.
+// so the milestone-1 Blend strategy can read a real Blend pool through its
+// public `get_reserve`.
 // ---------------------------------------------------------------------------
 
 #[contracttype]

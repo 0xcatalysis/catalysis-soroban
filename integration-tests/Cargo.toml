@@ -9,6 +9,3 @@ publish.workspace = true
 soroban-sdk = { workspace = true, features = ["testutils"] }
 catalysis-common = { workspace = true }
 cover-pool = { path = "../contracts/cover_pool" }
-policy = { path = "../contracts/policy" }
-blend-adapter = { path = "../contracts/blend_adapter" }
-mock-blend-pool = { path = "../contracts/mock_blend_pool" }

@@ -6,6 +6,8 @@ Stakers put XLM into a CoverPool. Vaults and lenders buy cover on their Blend su
 
 This is the Soroban implementation of [Catalysis](https://catalysis.network), which is live and audited on Ethereum. The full design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Built for Stellar Community Fund #46.
 
+> **Status: being rebuilt as a covered vault.** The contracts are being reworked to the design in [`docs/PLAN.md`](docs/PLAN.md): a CoveredVault that pays depositor shortfalls from the CoverPool at withdrawal. The `policy`, `blend_adapter` and `mock_blend_pool` contracts described below have been removed; the text is updated in the docs task at the end of the plan.
+>
 > **Status: pre-grant MVP.** The happy path runs end to end in tests and on testnet. The extensions scheduled for the grant milestones are listed in [Scope](#scope). The code is not audited — do not use it with real funds.
 
 ## How it works

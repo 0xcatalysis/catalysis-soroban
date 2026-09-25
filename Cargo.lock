@@ -217,14 +217,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
-name = "blend-adapter"
-version = "0.1.0"
-dependencies = [
- "catalysis-common",
- "soroban-sdk",
-]
-
-[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1001,11 +993,8 @@ checksum = "8e04e2fd2b8188ea827b32ef11de88377086d690286ab35747ef7f9bf3ccb590"
 name = "integration-tests"
 version = "0.1.0"
 dependencies = [
- "blend-adapter",
  "catalysis-common",
  "cover-pool",
- "mock-blend-pool",
- "policy",
  "soroban-sdk",
 ]
 
@@ -1146,14 +1135,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "mock-blend-pool"
-version = "0.1.0"
-dependencies = [
- "catalysis-common",
- "soroban-sdk",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1236,14 +1217,6 @@ checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
 dependencies = [
  "der",
  "spki",
-]
-
-[[package]]
-name = "policy"
-version = "0.1.0"
-dependencies = [
- "catalysis-common",
- "soroban-sdk",
 ]
 
 [[package]]

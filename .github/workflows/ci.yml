@@ -33,7 +33,7 @@ jobs:
       - name: Build contracts (wasm32v1-none)
         run: >
           cargo build --release --target wasm32v1-none
-          -p cover-pool -p policy -p blend-adapter -p mock-blend-pool
+          -p cover-pool
 
       - name: Contract sizes
         run: ls -l target/wasm32v1-none/release/*.wasm

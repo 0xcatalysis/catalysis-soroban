@@ -182,7 +182,7 @@ Deposits need no function: the vault transfers XLM straight to the strategy's ad
 
 Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` all passing.
 
-**Task 0 — Install and verify the toolchain (do this first).**
+**Task 0 — Install and verify the toolchain (do this first).** ✅ done 25 September 2026
 - The founders' Mac has no Rust toolchain at all (checked 25 September 2026): no `rustup`, `cargo` or Stellar CLI. Only `jq` is present.
 - Install rustup with the stable toolchain, then `rustup target add wasm32v1-none`
 - Install the Stellar CLI (`brew install stellar-cli` or `cargo install --locked stellar-cli`)
@@ -190,7 +190,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 - `stellar contract build`: confirm the WASMs build
 - Report any problem before changing code
 
-**Task 1 — Delete** `policy`, `blend_adapter` and `mock_blend_pool`, and the old Blend-policy integration test. Update the workspace members, the `integration-tests` dev-dependencies, and the interfaces in `common` (keep the Blend types). Update the WASM build step in `.github/workflows/ci.yml`, which names the contract crates explicitly, to `cover-pool`, `covered-vault` and `mock-strategy` (add the last two as their crates land).
+**Task 1 — Delete** ✅ done 25 September 2026 — `policy`, `blend_adapter` and `mock_blend_pool`, and the old Blend-policy integration test. Update the workspace members, the `integration-tests` dev-dependencies, and the interfaces in `common` (keep the Blend types). Update the WASM build step in `.github/workflows/ci.yml`, which names the contract crates explicitly, to `cover-pool`, `covered-vault` and `mock-strategy` (add the last two as their crates land).
 - This comes first so that every later task can end with the whole workspace green. Changing the pool API while `policy` still calls the old interface would leave the workspace broken until the rewrite.
 
 **Task 2 — CoverPool API change** (section 4.1). Update its unit tests.
@@ -219,7 +219,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 **Task 7 — Docs.** Update `README.md` and `docs/ARCHITECTURE.md` to match the code (section 8). Put the testnet contract IDs in the README table.
 
 **Task 8 — Ship.**
-- The repo lives at `github.com/0xcatalysis/catalysis-soroban` (create it private while in progress, matching the org's other unshipped repos; make it public before submission). Push; confirm CI is green, including the WASM build step.
+- The repo lives at `github.com/0xcatalysis/catalysis-soroban` (public, created 25 September 2026). Push; confirm CI is green, including the WASM build step.
 - Tag `v0.1.0-mvp`.
 
 ---

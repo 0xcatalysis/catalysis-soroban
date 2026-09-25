@@ -3,9 +3,6 @@ resolver = "2"
 members = [
     "contracts/common",
     "contracts/cover_pool",
-    "contracts/policy",
-    "contracts/blend_adapter",
-    "contracts/mock_blend_pool",
     "integration-tests",
 ]
 

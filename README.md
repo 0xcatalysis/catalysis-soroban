@@ -10,7 +10,7 @@ This is the Soroban implementation of [Catalysis](https://catalysis.network), wh
 |---|---|
 | [Technical architecture](https://0xcatalysis.github.io/catalysis-soroban/) (also [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) | The reviewer document: the problem, what exists, the Stellar constraints, contracts, accounting, security, milestones, growth metrics, team |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Every design decision made during the build, with the reason and what was rejected |
-| [`docs/BACKGROUND.md`](docs/BACKGROUND.md) | The research behind the architecture: the February 2026 incident forensics, the full Stellar constraints list, issuer-flag evidence, rent and TTL, the Blend, DeFindex and oracle read surfaces, and the full known-limitations list |
+| [`docs/BACKGROUND.md`](docs/BACKGROUND.md) | The research behind the architecture: the February 2026 incident forensics, the full Stellar constraints list, issuer-flag evidence, rent and TTL, the Blend, DeFindex and oracle read surfaces, the threat table, and the full known-limitations list |
 | [`docs/PLAN.md`](docs/PLAN.md) | The build plan, the founders' fixed decisions, the task log and the known-limitations list |
 | [`CLAUDE.md`](CLAUDE.md) | Rules and conventions for anyone (or any agent) working in this repo |
 

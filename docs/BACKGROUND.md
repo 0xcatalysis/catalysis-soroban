@@ -1,6 +1,6 @@
 # Catalysis on Soroban — Background and research notes
 
-Supporting material for the [technical architecture document](ARCHITECTURE.md): the incident forensics, the full list of Stellar constraints, what we found on the ledger about issuer flags, rent and TTL, the Blend and DeFindex read surfaces, the oracle-trigger design that follows mainnet, and the full known-limitations list. Everything here was verified against primary sources on 25 September 2026. Section references in parentheses of the form 2.x point to the constraints list in part B below; all others point to the architecture document.
+Supporting material for the [technical architecture document](ARCHITECTURE.md): the incident forensics, the full list of Stellar constraints, what we found on the ledger about issuer flags, rent and TTL, the Blend and DeFindex read surfaces, the oracle-trigger design that follows mainnet, the threat table, and the full known-limitations list. Everything here was verified against primary sources on 25 September 2026. Section references in parentheses of the form 2.x point to the constraints list in part B below; all others point to the architecture document.
 
 ---
 
@@ -202,7 +202,35 @@ pub trait TriggerModule {
 
 ---
 
-## F. Known MVP limitations, in full
+## F. Threat model
+
+The threat table from earlier versions of the architecture document, kept here as the starting point for the milestone-2 STRIDE threat model. Section references point to the architecture document.
+
+| Threat | Mitigation | Status |
+|---|---|---|
+| Payout redirected, by us or anyone | `claim` pays the calling vault against its own cover; no recipient parameter; no claims role exists (4.2) | Implemented |
+| Payout larger than the cover bought | Pool caps every claim at the vault's remaining cover (4.3) | Implemented |
+| Unauthorized caller opens, claims or closes cover | Vault-facing pool functions require the vault's own auth and the admin's whitelist (4.2) | Implemented |
+| A depositor paid more than they are owed | Payout is `max(value, protected)`; principal is reduced pro rata on every withdrawal (5.2) | Implemented |
+| Pool unable to pay a valid claim | Full collateralisation; capital backing cover cannot be unstaked (4.3) | Implemented |
+| Capacity over-writing | Reservation atomic with purchase; `coverage_written <= total_capital` (4.3) | Implemented |
+| Issuer freezes or claws back pool capital | Pool holds native XLM, which has no issuer (6.2) | Implemented |
+| Allowance revoked when a loss looks likely | Custody-lock staking; no `transfer_from` path (4.3) | Implemented |
+| Settlement cost grows with stakers | Loss absorbed by share value; four writes, constant in staker count (7.2) | Implemented |
+| Pool share price inflated by a direct transfer | Share price computed from internal accounting, not token balance (7.2) | Implemented |
+| Vault share price inflated by donating to a strategy | Zero-share mints rejected; virtual share offset or minimum first deposit to follow (8.5) | Partial |
+| Rounding drift | Mint, redeem and shortfall maths round down, in the contract's favour; dust operations rejected (4.3, 5.2) | Implemented |
+| Oracle manipulation to suppress or force a payout | The payout reads no price; it is the vault's accounting (5.2) | Implemented |
+| Cross-contract reentrancy | Blocked by the host (2.9); the vault calls out, nothing calls back in (4.2) | Implemented |
+| Staker flight ahead of a known loss | Lock and full collateralisation today; loss reporting and a notice period (4.4) | Milestone 1 |
+| Cover exhausted, later withdrawers unpaid | Cover sized above maximum loss today; pro-rata shortfall accounting (8.5) | Milestone 1 |
+| Curator allocates to a bad strategy | Curator whitelists strategies; depositors trust the curator, as on Morpho; allocation limits (9) | Milestone 2 |
+| Position archived when a withdrawal or claim lands | Protocol-23 automatic restore; interactions extend TTL today, keeper in milestone 2 (9) | Partial |
+| Admin key compromise | 10.3 | Before mainnet |
+
+---
+
+## G. Known MVP limitations, in full
 
 Each of these is a deliberate simplification of the Ethereum design, documented rather than fixed in the MVP, with the milestone that addresses it.
 

@@ -311,7 +311,7 @@ A strategy is anything that exposes `total_value()` and `withdraw(amount)` and a
 
 ### 5.5 What the vault does not do in the MVP
 
-The Ethereum wrapper has controls the MVP deliberately omits: streaming premium charged to depositors, a per-depositor loss cap, a curator review gate between successive claims, a deposit cap, and an emergency exit that waives insurance. Section 8.5 lists these with the milestone that adds each.
+The Ethereum wrapper has controls the MVP deliberately omits: streaming premium charged to depositors, a per-depositor loss cap, a curator review gate between successive claims, a deposit cap, and an emergency exit that waives insurance. Section 8.4 lists these with the milestone that adds each.
 
 ---
 
@@ -387,31 +387,7 @@ The integration test replays the demo: Alice's 1,000 XLM stake is slashed exactl
 
 ## 8. Security
 
-### 8.1 Threat model
-
-| Threat | Mitigation | Status |
-|---|---|---|
-| Payout redirected, by us or anyone | `claim` pays the calling vault against its own cover; no recipient parameter; no claims role exists (4.2) | Implemented |
-| Payout larger than the cover bought | Pool caps every claim at the vault's remaining cover (4.3) | Implemented |
-| Unauthorized caller opens, claims or closes cover | Vault-facing pool functions require the vault's own auth and the admin's whitelist (4.2) | Implemented |
-| A depositor paid more than they are owed | Payout is `max(value, protected)`; principal is reduced pro rata on every withdrawal (5.2) | Implemented |
-| Pool unable to pay a valid claim | Full collateralisation; capital backing cover cannot be unstaked (4.3) | Implemented |
-| Capacity over-writing | Reservation atomic with purchase; `coverage_written <= total_capital` (4.3) | Implemented |
-| Issuer freezes or claws back pool capital | Pool holds native XLM, which has no issuer (6.2) | Implemented |
-| Allowance revoked when a loss looks likely | Custody-lock staking; no `transfer_from` path (4.3) | Implemented |
-| Settlement cost grows with stakers | Loss absorbed by share value; four writes, constant in staker count (7.2) | Implemented |
-| Pool share price inflated by a direct transfer | Share price computed from internal accounting, not token balance (7.2) | Implemented |
-| Vault share price inflated by donating to a strategy | Zero-share mints rejected; virtual share offset or minimum first deposit to follow (8.5) | Partial |
-| Rounding drift | Mint, redeem and shortfall maths round down, in the contract's favour; dust operations rejected (4.3, 5.2) | Implemented |
-| Oracle manipulation to suppress or force a payout | The payout reads no price; it is the vault's accounting (5.2) | Implemented |
-| Cross-contract reentrancy | Blocked by the host (2.9); the vault calls out, nothing calls back in (4.2) | Implemented |
-| Staker flight ahead of a known loss | Lock and full collateralisation today; loss reporting and a notice period (4.4) | Milestone 1 |
-| Cover exhausted, later withdrawers unpaid | Cover sized above maximum loss today; pro-rata shortfall accounting (8.5) | Milestone 1 |
-| Curator allocates to a bad strategy | Curator whitelists strategies; depositors trust the curator, as on Morpho; allocation limits (9) | Milestone 2 |
-| Position archived when a withdrawal or claim lands | Protocol-23 automatic restore; interactions extend TTL today, keeper in milestone 2 (9) | Partial |
-| Admin key compromise | 10.3 | Before mainnet |
-
-### 8.2 Testing
+### 8.1 Testing
 
 83 tests, run by `scripts/check.sh` together with `cargo fmt`, `cargo clippy -D warnings` and the `stellar contract build` of every contract; the same steps are in the GitHub Actions workflow.
 
@@ -427,7 +403,7 @@ Planned for milestone 1:
 - property tests on the pool and vault invariants across randomized sequences
 - the same scenario against a real Blend V2 pool on testnet through the Blend strategy
 
-### 8.3 Admin authority and its limits
+### 8.2 Admin authority and its limits
 
 The pool admin can whitelist vaults and upgrade the pool. It cannot alter a vault's cover, redirect or block a claim, withdraw staked capital, or change share value other than through a claim.
 
@@ -437,13 +413,13 @@ The mock strategy's admin can simulate a loss. That is a demo harness and not pa
 
 Underwriting terms — the premium rate and the lock — are fixed when the pool is deployed. The upgrade path is each admin's one broad power, so before mainnet it moves behind a multisig with a timelock, both published on deployment.
 
-### 8.4 Audit and licensing
+### 8.3 Audit and licensing
 
 Sigma Prime led our Ethereum audits (Core, March 2026; Coverage, April 2026; combined, May 2026), with Certora on the covered vault (March 2026). All four reports are public at https://docs.catalysis.network/docs/audits/.
 
 For the Soroban contracts we engage a Soroban-experienced auditor, with scope agreed before implementation completes and remediation closed before mainnet. SCF audit credits cover the cost, and no audit expense appears in the budget. The Soroban contracts are published under Apache-2.0.
 
-### 8.5 Known MVP limitations
+### 8.4 Known MVP limitations
 
 Each is a deliberate simplification of the Ethereum design, documented rather than fixed in the MVP. The full list with the Ethereum mechanism each corresponds to is in `docs/BACKGROUND.md` part F.
 
@@ -462,8 +438,8 @@ Three milestones. The final one is mainnet launch. This is a technical roadmap: 
 | Milestone | Scope | Done when | Target |
 |---|---|---|---|
 | 1 — Real yield, real losses | **Blend V2 strategy** on testnet: supplies and withdraws through Blend's `submit`, values its position through `b_rate` (5.4). **Loss reporting** at strategy level: the vault reports a loss to the pool when it happens, the pool records the shortfall, and remaining cover is shared pro rata rather than first-come (4.4, 8.5). **Staker notice period** after the lock. **Cover expiry and streaming premium** accrued per ledger from vault yield instead of paid upfront by the curator. **Property tests** on the pool and vault invariants across randomized sequences. | The demo scenario runs on testnet against a Blend V2 pool, with the loss coming from a real `b_rate` decline in that pool rather than a mock. An integration test and a testnet run show a reported loss slashing stakers before any depositor withdraws. A test shows two depositors whose combined shortfall exceeds remaining cover each paid the same fraction. Tests show premium accruing per ledger from yield and cover ending at its expiry ledger. Property tests run in `scripts/check.sh` and CI. | 31 Jan 2027 |
-| 2 — Curation and operations | **Multiple Blend markets** per vault with curator **allocation limits** enforced on-chain (8.3). **Keeper** for TTL maintenance, funded from premium and open-sourced so anyone can run it (2.5). **USDC vault and pool** alongside XLM, with the issuer freeze right disclosed (6.2). **STRIDE threat model and on-chain monitoring plan**, published in this repository. **Contracts feature-frozen and tagged for audit.** | A vault on testnet holds positions in two Blend markets under limits the contract enforces, with a test showing an over-limit allocation rejected. The keeper is in this repository and has carried every position through a full TTL cycle on testnet. The demo runs end to end on a USDC vault and pool on testnet. The threat model and monitoring plan are committed. A tagged release marks the audit scope. | 28 Feb 2027 |
-| 3 — Mainnet | **Audit remediation** with the report published. **Multisig and timelock** on every admin function (8.3), with `migrate()` for future upgrades (2.10). **Mainnet deployment.** **A covered vault live on mainnet**, operated by the team: pool, vault and Blend strategy deployed, stake in the pool, cover open, and the vault allocated to a Blend market. **SDK and integration docs** for curators and stakers. | All audit findings closed and the report linked from this document. Mainnet contract IDs published, every admin held by the multisig behind the timelock, verified from the ledger. The team has staked, bought cover, deposited, allocated to a Blend market and withdrawn on mainnet, with the transactions linked. The SDK is published with docs and the demo script uses it. | 31 Mar 2027 |
+| 2 — Curation and operations | **Multiple Blend markets** per vault with curator **allocation limits** enforced on-chain (8.2). **Keeper** for TTL maintenance, funded from premium and open-sourced so anyone can run it (2.5). **USDC vault and pool** alongside XLM, with the issuer freeze right disclosed (6.2). **STRIDE threat model and on-chain monitoring plan**, published in this repository. **Contracts feature-frozen and tagged for audit.** | A vault on testnet holds positions in two Blend markets under limits the contract enforces, with a test showing an over-limit allocation rejected. The keeper is in this repository and has carried every position through a full TTL cycle on testnet. The demo runs end to end on a USDC vault and pool on testnet. The threat model and monitoring plan are committed. A tagged release marks the audit scope. | 28 Feb 2027 |
+| 3 — Mainnet | **Audit remediation** with the report published. **Multisig and timelock** on every admin function (8.2), with `migrate()` for future upgrades (2.10). **Mainnet deployment.** **A covered vault live on mainnet**, operated by the team: pool, vault and Blend strategy deployed, stake in the pool, cover open, and the vault allocated to a Blend market. **SDK and integration docs** for curators and stakers. | All audit findings closed and the report linked from this document. Mainnet contract IDs published, every admin held by the multisig behind the timelock, verified from the ledger. The team has staked, bought cover, deposited, allocated to a Blend market and withdrawn on mainnet, with the transactions linked. The SDK is published with docs and the demo script uses it. | 31 Mar 2027 |
 
 Oracle-derived triggers and a DeFindex strategy (`docs/BACKGROUND.md` part E) follow mainnet and are not in this grant's scope. They are specified there because they shape the strategy interface, and because a reviewer should see what the accounting-only design deliberately excludes.
 
@@ -477,7 +453,7 @@ The published #46 calendar runs:
 
 Notification, information collection and KYB follow the vote, so tranche #0 may arrive while milestone 1 is under way; we start on our own balance sheet rather than wait for it. Each tranche completion form falls well inside the 90-day window that runs from receipt of the preceding payment.
 
-**Budget.** The budget is in the submission form, sized to two engineers over the three milestones. It carries ledger rent as its own line and no audit cost, which SCF credits cover (8.4).
+**Budget.** The budget is in the submission form, sized to two engineers over the three milestones. It carries ledger rent as its own line and no audit cost, which SCF credits cover (8.3).
 
 **The critical path is the audit, not the engineering.** Mainnet by 31 March needs an audit slot, the audit itself and remediation to fit inside March. The audit is therefore engaged during milestone 2 with scope frozen at the end of February. Milestone 3 adds no new contract functionality — only remediation, deployment and the first live vault.
 

@@ -221,7 +221,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 
 **Task 7 — Docs.** ✅ done 25 September 2026. Update `README.md` and `docs/ARCHITECTURE.md` to match the code (section 8). Put the testnet contract IDs in the README table. Added the Apache-2.0 `LICENSE` file.
 
-**Task 8 — Ship.**
+**Task 8 — Ship.** ✅ done 25 September 2026: CI workflow run green on GitHub by manual dispatch (WASM build included); tagged `v0.1.0-mvp`. Repo stays private and the workflow manual until submission (TODO below).
 - The repo lives at `github.com/0xcatalysis/catalysis-soroban`, created 25 September 2026. It is **private until submission** (founders' decision, 25 September 2026). Push; confirm CI is green, including the WASM build step.
 - **CI runs locally for now** (founders' decision, 25 September 2026): `./scripts/check.sh` runs fmt, clippy, tests and the WASM build. The GitHub workflow is `workflow_dispatch` only.
 - **TODO(founders) before hitting submit:** make the repo public, restore the `push` and `pull_request` triggers in `.github/workflows/ci.yml` and confirm a green run, then re-check that the GitHub URL, the architecture doc link and the README links in the SCF form all open in a logged-out browser. `gh repo edit 0xcatalysis/catalysis-soroban --visibility public --accept-visibility-change-consequences`
@@ -230,6 +230,8 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 ---
 
 ## 6. Acceptance criteria for the MVP
+
+All met on 25 September 2026, except that the GitHub run was by manual dispatch (see Task 8).
 
 - `cargo test --workspace` green; CI green on GitHub including the `wasm32v1-none` build
 - `./scripts/demo_testnet.sh` runs start to finish on testnet with no manual steps, and the printed numbers match section 1

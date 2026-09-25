@@ -1,0 +1,60 @@
+# Publishes docs/ARCHITECTURE.md as a GitHub Pages site, so the SCF
+# application has a public link to the technical architecture document.
+# The site is public even while the repository is private (org Team plan).
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/ARCHITECTURE.md
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site from docs/ARCHITECTURE.md
+        run: |
+          mkdir site
+          cat > site/_config.yml <<'CFG'
+          title: Catalysis on Soroban
+          description: Technical architecture document for the SCF #46 submission
+          theme: jekyll-theme-primer
+          markdown: kramdown
+          kramdown:
+            input: GFM
+            hard_wrap: false
+          CFG
+          { printf -- '---\nlayout: default\ntitle: Technical Architecture\n---\n\n'; cat docs/ARCHITECTURE.md; } > site/index.md
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./site
+          destination: ./_site
+
+      - uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

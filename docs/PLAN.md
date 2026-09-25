@@ -200,7 +200,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 
 **Task 3 — MockStrategy** (section 4.3), with unit tests. ✅ done 25 September 2026.
 
-**Task 4 — CoveredVault** (section 4.2), with unit tests covering:
+**Task 4 — CoveredVault** (section 4.2). ✅ done 25 September 2026. Unit tests covering:
 - deposit and share minting
 - NAV across idle plus two strategies
 - withdraw with no loss (no claim)

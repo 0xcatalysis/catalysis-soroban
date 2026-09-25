@@ -1,0 +1,21 @@
+[package]
+name = "covered-vault"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+catalysis-common = { workspace = true }
+
+# Dev-only: the unit tests register the real pool and strategy contracts.
+# Dev-dependencies do not reach the Wasm, so nothing leaks into the build.
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+cover-pool = { path = "../cover_pool" }
+mock-strategy = { path = "../mock_strategy" }

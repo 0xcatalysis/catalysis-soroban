@@ -220,7 +220,8 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 
 **Task 8 — Ship.**
 - The repo lives at `github.com/0xcatalysis/catalysis-soroban`, created 25 September 2026. It is **private until submission** (founders' decision, 25 September 2026). Push; confirm CI is green, including the WASM build step.
-- **TODO(founders) before hitting submit:** make the repo public, then re-check that the GitHub URL, the architecture doc link and the README links in the SCF form all open in a logged-out browser. `gh repo edit 0xcatalysis/catalysis-soroban --visibility public --accept-visibility-change-consequences`
+- **CI runs locally for now** (founders' decision, 25 September 2026): `./scripts/check.sh` runs fmt, clippy, tests and the WASM build. The GitHub workflow is `workflow_dispatch` only.
+- **TODO(founders) before hitting submit:** make the repo public, restore the `push` and `pull_request` triggers in `.github/workflows/ci.yml` and confirm a green run, then re-check that the GitHub URL, the architecture doc link and the README links in the SCF form all open in a logged-out browser. `gh repo edit 0xcatalysis/catalysis-soroban --visibility public --accept-visibility-change-consequences`
 - Tag `v0.1.0-mvp`.
 
 ---

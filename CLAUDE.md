@@ -16,6 +16,7 @@ Covered vaults for Stellar. A vault takes XLM deposits and allocates them to str
 ## Commands
 
 ```sh
+./scripts/check.sh                          # fmt, clippy, tests, WASM build (the local CI)
 cargo test --workspace
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
@@ -36,4 +37,4 @@ Needs Rust stable with the `wasm32v1-none` target, the Stellar CLI and `jq`.
 - **Tests** use `env.mock_all_auths_allowing_non_root_auth()`. Nested token transfers authorized by a root signer need the non-root variant.
 - **Amounts** are in stroops (1 XLM = 10,000,000). Share and value maths round down, in the contract's favour.
 - **Storage.** Config and aggregate state go in instance storage; per-user entries go in persistent storage and have their TTL extended on write. `test_snapshots/` is gitignored.
-- **CI** (`.github/workflows/ci.yml`) runs fmt, clippy `-D warnings`, the tests, and a `wasm32v1-none` release build. Keep it green.
+- **CI runs locally.** `./scripts/check.sh` runs fmt, clippy `-D warnings`, the tests, and the WASM build; run it before every commit. The GitHub workflow is manual-only until submission.

@@ -1,8 +1,10 @@
 name: CI
 
+# Manual-only while the repo is private, to save Actions minutes. The same
+# checks run locally with scripts/check.sh. Restore `push` and `pull_request`
+# triggers before the SCF submission (see docs/PLAN.md Task 8).
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

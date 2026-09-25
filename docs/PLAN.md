@@ -208,7 +208,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 - a late depositor after a loss has no shortfall
 - a partial withdrawal claims a proportional shortfall
 
-**Task 5 — Integration tests** in `integration-tests/tests/`:
+**Task 5 — Integration tests** in `integration-tests/tests/`. ✅ done 25 September 2026.
 - `covered_vault_demo.rs`: the section 1 table, asserting every number
 - a quiet-path test: no loss, exact withdrawal, no slashing
 

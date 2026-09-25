@@ -9,3 +9,5 @@ publish.workspace = true
 soroban-sdk = { workspace = true, features = ["testutils"] }
 catalysis-common = { workspace = true }
 cover-pool = { path = "../contracts/cover_pool" }
+covered-vault = { path = "../contracts/covered_vault" }
+mock-strategy = { path = "../contracts/mock_strategy" }

@@ -1005,6 +1005,8 @@ version = "0.1.0"
 dependencies = [
  "catalysis-common",
  "cover-pool",
+ "covered-vault",
+ "mock-strategy",
  "soroban-sdk",
 ]
 

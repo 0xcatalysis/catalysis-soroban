@@ -2,7 +2,7 @@
 
 Covered vaults for Stellar. A vault takes XLM deposits and allocates them to strategies (Blend markets, mocked for now). A staked XLM insurance pool (CoverPool) pays any shortfall when a depositor withdraws, slashing its stakers pro rata. This is the Soroban port of Catalysis, which is live and audited on Ethereum. It is being built for a Stellar Community Fund #46 grant application (deadline 8 November 2026).
 
-**Start here:** `docs/PLAN.md` is the current build plan and task list. `docs/ARCHITECTURE.md` is the grant's technical architecture document and must always match the code.
+**Start here:** `docs/PLAN.md` is the build plan and task log. `docs/ARCHITECTURE.md` is the grant's technical architecture document and must always match the code; it is published at https://0xcatalysis.github.io/catalysis-soroban/ by a Pages workflow. `docs/DECISIONS.md` logs every design decision with its reason; add to it when you make one.
 
 ## Rules
 

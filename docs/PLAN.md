@@ -224,6 +224,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 **Task 8 — Ship.** ✅ done 25 September 2026: CI workflow run green on GitHub by manual dispatch (WASM build included); tagged `v0.1.0-mvp`. Repo stays private and the workflow manual until submission (TODO below).
 - The repo lives at `github.com/0xcatalysis/catalysis-soroban`, created 25 September 2026. It is **private until submission** (founders' decision, 25 September 2026). Push; confirm CI is green, including the WASM build step.
 - **CI runs locally for now** (founders' decision, 25 September 2026): `./scripts/check.sh` runs fmt, clippy, tests and the WASM build. The GitHub workflow is `workflow_dispatch` only.
+- **Architecture document link for the SCF form:** https://0xcatalysis.github.io/catalysis-soroban/ (GitHub Pages, public even while the repo is private; rebuilt by `.github/workflows/pages.yml` on every change to `docs/ARCHITECTURE.md`).
 - **TODO(founders) before hitting submit:** make the repo public, restore the `push` and `pull_request` triggers in `.github/workflows/ci.yml` and confirm a green run, then re-check that the GitHub URL, the architecture doc link and the README links in the SCF form all open in a logged-out browser. `gh repo edit 0xcatalysis/catalysis-soroban --visibility public --accept-visibility-change-consequences`
 - Tag `v0.1.0-mvp`.
 

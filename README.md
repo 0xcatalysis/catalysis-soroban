@@ -4,7 +4,14 @@
 
 Depositors put XLM into a CoveredVault. The curator allocates it to strategies (Blend markets, mocked for now) and buys cover from a CoverPool funded by stakers. If a strategy loses money, a depositor still withdraws in full: the vault claims the shortfall from the pool in the same transaction, and every staker is slashed pro rata. No trigger, no oracle, no claims committee. The payout is the vault's own accounting.
 
-This is the Soroban implementation of [Catalysis](https://catalysis.network), which is live and audited on Ethereum. The full design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the build plan and known limitations are in [`docs/PLAN.md`](docs/PLAN.md). Built for Stellar Community Fund #46.
+This is the Soroban implementation of [Catalysis](https://catalysis.network), which is live and audited on Ethereum. Built for Stellar Community Fund #46.
+
+| Document | What it is |
+|---|---|
+| [Technical architecture](https://0xcatalysis.github.io/catalysis-soroban/) (also [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) | The design as shipped: constraints, contracts, storage, interfaces, accounting, threat model, known limitations, milestones |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Every design decision made during the build, with the reason and what was rejected |
+| [`docs/PLAN.md`](docs/PLAN.md) | The build plan, the founders' fixed decisions, the task log and the known-limitations list |
+| [`CLAUDE.md`](CLAUDE.md) | Rules and conventions for anyone (or any agent) working in this repo |
 
 > **Status: pre-grant MVP.** The happy path runs end to end in 83 tests and on Stellar testnet. The extensions scheduled for the grant milestones are listed in [Scope](#scope). The code is not audited. Do not use it with real funds.
 
@@ -45,6 +52,43 @@ The demo scenario, which is also the integration test and the testnet script:
 
 **Why payout at withdrawal.** It is how Catalysis works on Ethereum, and it needs no trigger and no oracle. A loss in a strategy lowers the vault's NAV; the vault's own books say exactly what each depositor is short. The loss we most want to cover is the one where an oracle has already failed, so the payout depends on nothing but the accounting.
 
+## How the contracts talk
+
+```
+depositor ──withdraw──► CoveredVault ──withdraw(amount)──► Strategy ──transfer──► vault
+                            │
+                            ├──claim(vault, shortfall)──► CoverPool ──transfer──► vault
+                            │
+                            └──transfer(value + shortfall)──► depositor
+```
+
+- **Calls only go outward.** The vault calls the pool and the strategies; they call only the XLM token contract. Nothing calls back into the vault, so Soroban's no-reentrancy rule is never hit.
+- **Contract authorization is implicit on direct calls.** When the vault invokes the pool, the pool's `vault.require_auth()` passes because the vault is the direct invoker. A plain account cannot claim on a vault's behalf. This is why `buy_cover` and `close_cover` exist on the vault: the pool insists on the vault's own signature.
+- **The curator signs once for cover.** Their signature on `buy_cover` covers the nested premium transfer from their account to the pool.
+- **Interfaces live in [`contracts/common`](contracts/common/src/lib.rs)** as `#[contractclient]` traits, so no contract depends on another's crate and no exports leak between WASMs.
+
+**Accounting rules.** Amounts are in stroops (1 XLM = 10,000,000). Share and value maths round down, in the contract's favour. Operations that would mint zero shares or pay zero fail rather than round. NAV is idle XLM plus what every strategy reports; it is never read from the vault's own token balance, so the pool's payout passing through the vault cannot inflate it.
+
+**Storage.** Config and aggregate state are in instance storage. Each staker position, depositor position and vault cover is a persistent entry whose TTL is extended on every write, and anyone can extend a position with `bump_position`.
+
+## Repository layout
+
+```
+contracts/
+  cover_pool/       staked XLM insurance pool
+  covered_vault/    the vault
+  mock_strategy/    TEST AND DEMO ONLY stand-in for a Blend market
+  common/           cross-contract interfaces + Blend V2 types for milestone 1
+integration-tests/  the demo scenario and the quiet path, end to end
+scripts/
+  check.sh          local CI: fmt, clippy, tests, WASM build
+  demo_testnet.sh   the demo on Stellar testnet
+deployments/        testnet contract IDs, written by the demo script
+data/issuer-flags/  ledger evidence for "why native XLM", with a re-run script
+docs/               ARCHITECTURE.md, DECISIONS.md, PLAN.md
+.github/workflows/  ci.yml (manual until submission), pages.yml (publishes the architecture doc)
+```
+
 ## Run the tests
 
 ```sh
@@ -52,7 +96,7 @@ The demo scenario, which is also the integration test and the testnet script:
 cargo test --workspace  # tests only
 ```
 
-Needs Rust stable with the `wasm32v1-none` target and the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) 28 or later.
+Needs Rust stable with the `wasm32v1-none` target and the [Stellar CLI](https://developers.stellar.org/docs/tools/cli) 28 or later. soroban-sdk 28 requires contracts to be built through `stellar contract build`; a plain `cargo build --target wasm32v1-none` is refused by the SDK's build script.
 
 | Crate | Tests | What they cover |
 |---|---|---|
@@ -84,6 +128,13 @@ Deployed 25 September 2026.
 | CoveredVault | [`CDMDOL3XKEHHUOCX7M7QRLCBH6AULKHGHGTKIQXOW6HSC7GJKLBAU27A`](https://stellar.expert/explorer/testnet/contract/CDMDOL3XKEHHUOCX7M7QRLCBH6AULKHGHGTKIQXOW6HSC7GJKLBAU27A) |
 | MockStrategy A | [`CAVB427ZBHTTDCC7TMKWQZIBDAUQTMEXASF2KAQ7HMB26TM3TCJEH6II`](https://stellar.expert/explorer/testnet/contract/CAVB427ZBHTTDCC7TMKWQZIBDAUQTMEXASF2KAQ7HMB26TM3TCJEH6II) |
 | MockStrategy B | [`CAK4WT6UOXAXLBZRN37X6WHXBEUREQ4G6YDQHJWIGQMUVDUZVBX4WFF6`](https://stellar.expert/explorer/testnet/contract/CAK4WT6UOXAXLBZRN37X6WHXBEUREQ4G6YDQHJWIGQMUVDUZVBX4WFF6) |
+
+## Development
+
+- `soroban-sdk 28.0.0` is the only dependency. Contracts are `#![no_std]` with `crate-type = ["cdylib", "rlib"]`.
+- Run `./scripts/check.sh` before every commit. It is the same sequence as the CI workflow, which is dispatched manually while the repository is private.
+- Conventions (errors, events, upgrades, storage, auth in tests) are in [`CLAUDE.md`](CLAUDE.md). Unit tests register the real pool and strategy contracts through dev-dependencies, which never reach the WASM.
+- Mocks say **TEST AND DEMO ONLY** in their doc comments, here, and in the architecture doc.
 
 ## Scope
 

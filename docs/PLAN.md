@@ -138,9 +138,10 @@ fn withdraw(env, from: Address, shares: i128) -> i128;     // -> amount paid
     // value     = shares * nav / total_shares               (round down)
     // protected = position.principal * shares / position.shares
     // shortfall = max(protected - value, 0)
+    // claimable = shortfall - shortfall * DEDUCTIBLE_BPS / 10_000   (DEDUCTIBLE_BPS = 0 in the MVP)
     // pull `value` of liquidity: idle first, then strategy.withdraw(...) in order
-    // if shortfall > 0: cover_pool.claim(vault, shortfall)
-    // pay `value + shortfall` to `from`
+    // if claimable > 0: cover_pool.claim(vault, claimable)
+    // pay `value + claimable` to `from`
     // position.principal -= protected; position.shares -= shares; total_shares -= shares
 
 fn nav(env) -> i128;                                       // idle + Σ strategy.total_value()
@@ -154,6 +155,7 @@ Notes for the implementer:
 - Shares are internal and non-transferable in the MVP, which is what makes per-address principal tracking correct.
 - A depositor who arrives after a loss deposits at the lower NAV, so their principal equals their value and they have no shortfall. Principal tracking handles this automatically.
 - Call order inside `withdraw`: compute `value` from NAV **before** pulling liquidity out of the strategies.
+- The deductible exists in the code as a `DEDUCTIBLE_BPS` constant set to zero (founders' decision, 25 September 2026), so the withdrawal maths has the same shape as the Ethereum wrapper's `_capAndApplyDeductible` without changing the demo numbers. Do not make it configurable in the MVP.
 - `idle` is stored state, not the vault's live token balance. The shortfall claimed from the pool passes through the vault's balance on its way to the user; do **not** add it to `idle`.
 - If a strategy loses everything, NAV can be zero while shares are outstanding and the deposit formula divides by zero. Happy path: do not handle it; it is listed in section 7.
 
@@ -243,7 +245,7 @@ These go in ARCHITECTURE §10 as "known MVP limitations, addressed in milestone 
 - **Stakers can exit ahead of an unclaimed loss.** A loss exists as soon as a strategy fails, but stakers are only slashed when a depositor withdraws. A staker can unstake *excess* capital in between. The capital backing the vault's cover cannot leave, so payouts are always funded; the remaining stakers just carry more of the loss. Milestone 1: vault reports losses to the pool when they happen.
 - **No cover expiry or streaming premium.** The curator pays upfront; cover lasts until `close_cover`. On Ethereum, premium streams from depositor principal per second and is split between a platform fee, a pool fee and the restakers (`PremiumManager.distributePremium`). The MVP has no fee split: 100% of the premium goes to stakers.
 - **No curator review gate between claims.** On Ethereum, every approved claim sets `claimApprovalRequired` and the curator must call `approveNextClaim` before the next loss-making withdrawal succeeds. The MVP lets the vault claim repeatedly without review.
-- **No deductible or per-depositor loss cap.** The Ethereum `CoveredVaultWrapper` caps a claim at `maxCoverableLossBps` of the depositor's basis and subtracts `deductibleBps` before filing. The MVP pays the full shortfall.
+- **Deductible hardcoded to zero; no per-depositor loss cap.** The Ethereum `CoveredVaultWrapper` caps a claim at `maxCoverableLossBps` of the depositor's basis and subtracts `deductibleBps` before filing. The MVP keeps a `DEDUCTIBLE_BPS` constant in the vault set to zero and has no loss cap, so it pays the full shortfall.
 - **Cover cannot be topped up on Ethereum; it can here.** Ethereum policies have a fixed `coverageLimit` and need a new policy for more cover. The MVP's `open_cover` adds to the vault's remaining cover, which is simpler for the demo.
 - **Total loss of a strategy is not handled.** If NAV reaches zero with shares outstanding, `deposit` divides by zero. Cover is sized so the demo never gets there.
 - **The admin triggers losses in the mock strategies.** Demo only.

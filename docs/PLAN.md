@@ -198,7 +198,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 **Task 2 — CoverPool API change** (section 4.1). ✅ done 25 September 2026. Update its unit tests.
 - Must include a test that three sequential partial claims reduce `remaining` and slash stakers correctly.
 
-**Task 3 — MockStrategy** (section 4.3), with unit tests.
+**Task 3 — MockStrategy** (section 4.3), with unit tests. ✅ done 25 September 2026.
 
 **Task 4 — CoveredVault** (section 4.2), with unit tests covering:
 - deposit and share minting
@@ -216,6 +216,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 - Keep the `DEMO_PAUSE=1` step mode and the plain-English printouts.
 - Print the user's `position` before withdrawal (value 90 / protected 100) and the balances after (user +100, Alice's stake 990).
 - Write contract IDs to `deployments/testnet.json`.
+- Stellar resets Testnet periodically (roughly quarterly), which wipes deployed contracts. Re-run the script and refresh the IDs in the README shortly before recording the video and before submission.
 - Run it for real on testnet and fix it until it passes end to end. The existing script has never been run: check the CLI argument syntax (`--arg_name`, identity names vs addresses, `--send=no` for views) against the installed CLI version.
 
 **Task 7 — Docs.** Update `README.md` and `docs/ARCHITECTURE.md` to match the code (section 8). Put the testnet contract IDs in the README table.

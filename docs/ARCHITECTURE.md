@@ -33,19 +33,18 @@ Stellar has roughly $3.4B to $4.0B of tokenized real-world assets on-ledger (Ste
 
 ### 1.1 Existing solutions, and how this differs
 
-Nothing on Stellar or Soroban does this today. The two mechanisms that absorbed the February loss are the ones described above: Blend's backstop, which is first-loss capital in the protocol's own token (1.2), and discretionary compensation by the pool's operator (1.1). We found no on-ledger cover protocol on Stellar, and no product that lets an XLM holder earn premium for underwriting a named vault.
+Nothing on Stellar or Soroban does this today. The two mechanisms that absorbed the February loss are the ones described above: Blend's backstop, which is first-loss capital in the protocol's own token, and discretionary compensation by the pool's operator. We found no on-ledger cover protocol on Stellar, and no product that lets an XLM holder earn premium for underwriting a named vault.
 
 Elsewhere, DeFi cover exists in three shapes, and the design here differs from each on the same axis: who decides a claim, and what the payout is measured against.
 
 | | Who decides a claim | What backs it | How loss is measured |
 |---|---|---|---|
 | Nexus Mutual (Ethereum) | Members vote on each claim by staking the mutual's token ([docs](https://docs.nexusmutual.io/)) | The mutual's pooled capital, priced by staked NXM | Claimant's evidence, assessed by vote |
-| Sherlock (Ethereum) | A claims committee, with escalation to UMA's optimistic oracle ([docs](https://docs.sherlock.xyz/)) | USDC staking pools per covered protocol | Off-chain determination of exploit loss |
-| Blend backstop (Stellar) | Nobody: bad debt is auctioned against the backstop, then socialized (1.2) | BLND:USDC LP shares, the protocol's own token | Blend's own accounting |
+| Blend backstop (Stellar) | Nobody: bad debt is auctioned against the backstop, then socialized | BLND:USDC LP shares, the protocol's own token | Blend's own accounting |
 | Catalysis on Ethereum | Nobody: the vault wrapper files the claim inside the depositor's withdrawal | Restaked ETH via EigenLayer and Symbiotic | The vault's accounting: principal against share value |
 | **This design** | **Nobody: the vault claims inside the depositor's withdrawal (5.2)** | **Native XLM staked in a segregated pool (4, 6)** | **The vault's accounting (5.2)** |
 
-The first two put a human decision between the loss and the payout, which is where cover protocols historically disappoint their buyers, and their capital is either the cover protocol's own token or a stablecoin an issuer can freeze. The Blend backstop has no decision but is the covered protocol's own token and is first-loss, so it is a deductible, not risk transfer. Catalysis on Ethereum removed the decision; it relied on restaking for capital, which Stellar does not have (2.2).
+Nexus Mutual puts a human decision between the loss and the payout, which is where cover protocols historically disappoint their buyers, and its capital is the mutual's own token. The Blend backstop has no decision but is the covered protocol's own token and is first-loss, so it is a deductible, not risk transfer. Catalysis on Ethereum removed the decision; it relied on restaking for capital, which Stellar does not have (2.2).
 
 What this design adds over each: a payout with no decision-maker, measured by the covered vault's own books at the moment the depositor leaves; capacity in the network's base asset, which no issuer can freeze and which is not the token of any covered protocol; and full collateralisation enforced continuously rather than checked once (4.3). The value to each party is concrete. A depositor gets principal protection with no claim to file. A staker earns premium on XLM for underwriting a vault they chose. A curator can offer a covered vault on Blend without building any of this.
 

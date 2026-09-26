@@ -423,31 +423,13 @@ Each is a deliberate simplification of the Ethereum design, documented rather th
 
 ## 9. Delivery
 
-Three milestones. The final one is mainnet launch. This is a technical roadmap: every deliverable is code the team ships and runs, and every completion test in the third column is something the team can make true without any other party's participation. Blend and Reflector are permissionless, so integrating with them needs nobody's consent.
+Three milestones, the last one mainnet. Every deliverable is code the team ships and runs; every completion test is something the team can make true alone.
 
 | Milestone | Scope | Done when | Target |
 |---|---|---|---|
 | 1 — Real yield, real losses | **Blend V2 strategy** on testnet: supplies and withdraws through Blend's `submit`, values its position through `b_rate` (5.4). **Loss reporting** at strategy level: the vault reports a loss to the pool when it happens, the pool records the shortfall, and remaining cover is shared pro rata rather than first-come (4.4, 8.5). **Staker notice period** after the lock. **Cover expiry and streaming premium** accrued per ledger from vault yield instead of paid upfront by the curator. **Property tests** on the pool and vault invariants across randomized sequences. | The demo scenario runs on testnet against a Blend V2 pool, with the loss coming from a real `b_rate` decline in that pool rather than a mock. An integration test and a testnet run show a reported loss slashing stakers before any depositor withdraws. A test shows two depositors whose combined shortfall exceeds remaining cover each paid the same fraction. Tests show premium accruing per ledger from yield and cover ending at its expiry ledger. Property tests run in `scripts/check.sh` and CI. | 31 Jan 2027 |
 | 2 — Curation and operations | **Multiple Blend markets** per vault with curator **allocation limits** enforced on-chain (8.2). **Keeper** for TTL maintenance, funded from premium and open-sourced so anyone can run it (2.5). **USDC vault and pool** alongside XLM, with the issuer freeze right disclosed (6.2). **STRIDE threat model and on-chain monitoring plan**, published in this repository. **Contracts feature-frozen and tagged for audit.** | A vault on testnet holds positions in two Blend markets under limits the contract enforces, with a test showing an over-limit allocation rejected. The keeper is in this repository and has carried every position through a full TTL cycle on testnet. The demo runs end to end on a USDC vault and pool on testnet. The threat model and monitoring plan are committed. A tagged release marks the audit scope. | 28 Feb 2027 |
 | 3 — Mainnet | **Audit remediation** with the report published. **Multisig and timelock** on every admin function (8.2), with `migrate()` for future upgrades (2.10). **Mainnet deployment.** **A covered vault live on mainnet**, operated by the team: pool, vault and Blend strategy deployed, stake in the pool, cover open, and the vault allocated to a Blend market. **SDK and integration docs** for curators and stakers. | All audit findings closed and the report linked from this document. Mainnet contract IDs published, every admin held by the multisig behind the timelock, verified from the ledger. The team has staked, bought cover, deposited, allocated to a Blend market and withdrawn on mainnet, with the transactions linked. The SDK is published with docs and the demo script uses it. | 31 Mar 2027 |
-
-Oracle-derived triggers and a DeFindex strategy (`docs/BACKGROUND.md` part E) follow mainnet and are not in this grant's scope. They are specified there because they shape the strategy interface, and because a reviewer should see what the accounting-only design deliberately excludes.
-
-Build starts in the first week of January 2027 and completes within the first quarter.
-
-The published #46 calendar runs:
-
-- submission closes 8 November 2026
-- panel review 11 to 18 November
-- community vote 23 November to 3 December
-
-Notification, information collection and KYB follow the vote, so tranche #0 may arrive while milestone 1 is under way; we start on our own balance sheet rather than wait for it. Each tranche completion form falls well inside the 90-day window that runs from receipt of the preceding payment.
-
-**Budget.** The budget is in the submission form, sized to two engineers over the three milestones. It carries ledger rent as its own line and no audit cost, which SCF credits cover (8.3).
-
-**The critical path is the audit, not the engineering.** Mainnet by 31 March needs an audit slot, the audit itself and remediation to fit inside March. The audit is therefore engaged during milestone 2 with scope frozen at the end of February. Milestone 3 adds no new contract functionality — only remediation, deployment and the first live vault.
-
-**Milestone 1 starts partly delivered.** The Ethereum implementation of this system is shipped and audited, so the Soroban work is a reimplementation against a known specification rather than a design exercise. And the full happy path is built before this submission: staking, cover purchase, deposits and curator allocation, a strategy loss, payout at withdrawal with pro-rata slashing, premium distribution and unstaking, with 83 tests, a local and CI check, and a testnet demo whose contract IDs are in the README.
 
 ---
 

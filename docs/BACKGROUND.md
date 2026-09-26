@@ -246,3 +246,28 @@ Each of these is a deliberate simplification of the Ethereum design, documented 
 - **Shares are non-transferable.** By design; a transferable share would need principal to travel with it.
 - **The admin can upgrade the contracts.** Multisig and timelock before mainnet (10.3).
 - **The mock strategy's admin triggers losses.** Demo only.
+
+---
+
+## H. On-chain growth, and how it is measured
+
+Kept for the SCF form's question on how growth is driven and measured.
+
+The growth this unlocks is lending deposits. Every XLM in a covered vault is XLM supplied to a Blend market, and every XLM staked in a pool is XLM locked in a Soroban contract earning premium. Section 1 gives the gap: the chain has $3.4B to $4.0B of tokenized value and $164M in its primary lending market, and the reason is that nobody is paid to absorb a curation failure. A covered vault is the instrument that lets a depositor who would not accept the February outcome supply to Blend anyway, and lets an XLM holder be paid for standing behind that.
+
+Every metric below is contract state or an event, readable by anyone from the ledger, so growth is measured without trusting us.
+
+| Metric | Where it is read |
+|---|---|
+| XLM staked as cover capacity | `CoverPool.state().total_capital`, per pool |
+| Cover written | `CoverPool.state().coverage_written`; `CoverOpened` events |
+| XLM in covered vaults | `CoveredVault.nav()`, per vault; `Deposited` and `Withdrawn` events |
+| Of which supplied to Blend | each strategy's `total_value()` |
+| Depositors and stakers | position entries, from `Deposited` and `Staked` events |
+| Premium paid to stakers | `CoverPool.state().premiums_paid` |
+| Shortfalls paid to depositors | `CoverPool.state().claims_paid`; `Slashed` events, one per claim |
+| Number of covered vaults and markets | `add_vault` and `add_strategy` events |
+
+The monitoring plan in milestone 2 publishes a dashboard over exactly these fields. The mainnet vault in milestone 3 is the first entry in it. What counts as success is the four balances that a covered vault moves on-ledger: capital staked, cover written, deposits covered, and premium paid, all in XLM, all from contract state.
+
+---

@@ -225,7 +225,7 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 - The repo lives at `github.com/0xcatalysis/catalysis-soroban`, created 25 September 2026. It is **private until submission** (founders' decision, 25 September 2026). Push; confirm CI is green, including the WASM build step.
 - **CI runs locally for now** (founders' decision, 25 September 2026): `./scripts/check.sh` runs fmt, clippy, tests and the WASM build. The GitHub workflow is `workflow_dispatch` only.
 - **Architecture document link for the SCF form:** https://0xcatalysis.github.io/catalysis-soroban/ (GitHub Pages, public even while the repo is private; rebuilt by `.github/workflows/pages.yml` on every change to `docs/ARCHITECTURE.md`).
-- **TODO(founders) before hitting submit:** make the repo public, restore the `push` and `pull_request` triggers in `.github/workflows/ci.yml` and confirm a green run, then re-check that the GitHub URL, the architecture doc link and the README links in the SCF form all open in a logged-out browser. `gh repo edit 0xcatalysis/catalysis-soroban --visibility public --accept-visibility-change-consequences`
+- **TODO(founders) before hitting submit:** make the repo public and delete the "repository is private" sentence from ARCHITECTURE.md §0, restore the `push` and `pull_request` triggers in `.github/workflows/ci.yml` and confirm a green run, then re-check that the GitHub URL, the architecture doc link and the README links in the SCF form all open in a logged-out browser. `gh repo edit 0xcatalysis/catalysis-soroban --visibility public --accept-visibility-change-consequences`
 - Tag `v0.1.0-mvp`.
 
 ---

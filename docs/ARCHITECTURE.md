@@ -42,7 +42,7 @@ Stellar holds $3.4B to $4.0B of tokenized real-world assets (Stellar's Dune dash
 
 ### 1.1 Existing solutions
 
-We found no live on-ledger protocol on Stellar that pays a vault depositor's credit loss from staked capital, and none that lets an XLM holder earn premium for underwriting a named vault. Among SCF-funded projects the nearest neighbours are Etesia (tokenized vault infrastructure using risk-parity methods), Trustline (access controls with smart-contract insurance) and SAFU Protocol (stake-backed protection scoped to wallets).
+We found no live on-ledger protocol on Stellar that pays a vault depositor's credit loss from staked capital, and none that lets an XLM holder earn premium for underwriting a named vault.
 
 | | Who decides a claim | What backs it | How loss is measured |
 |---|---|---|---|

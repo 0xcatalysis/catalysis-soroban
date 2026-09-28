@@ -4,7 +4,7 @@
 
 Depositors put XLM into a CoveredVault. The curator allocates it to strategies (Blend markets, mocked for now) and buys cover from a CoverPool funded by stakers. If a strategy loses money, a depositor still withdraws in full: the vault claims the shortfall from the pool in the same transaction, and every staker is slashed pro rata. No trigger, no oracle, no claims committee. The payout is the vault's own accounting.
 
-This is the Soroban implementation of [Catalysis](https://catalysis.network), which is live and audited on Ethereum. Built for Stellar Community Fund #46.
+This is the Soroban implementation of [Catalysis](https://catalysis.network), which shipped to Ethereum mainnet and was audited by Sigma Prime and Certora. Built for Stellar Community Fund #46.
 
 | Document | What it is |
 |---|---|
@@ -139,15 +139,15 @@ Deployed 25 September 2026.
 
 ## Scope
 
-Built now (pre-grant MVP): everything above. Known limitations are listed in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §10.5, each with the milestone that addresses it.
+Built now (pre-grant MVP): everything above. Known limitations are listed in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §8.4, each with the milestone that addresses it.
 
-Scheduled for the grant milestones, per [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §11:
+Scheduled for the grant milestones, per [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §9:
 
-- **Milestone 1, 31 Jan 2027:** a real Blend V2 strategy on testnet valued through `b_rate`; loss reporting with pro-rata shortfall accounting and a staker notice period; cover expiry and streaming premium from vault yield; property tests
-- **Milestone 2, 28 Feb 2027:** multiple Blend markets with curator allocation limits; keeper-driven TTL maintenance; USDC vault and pool; STRIDE threat model and monitoring plan; audit engaged
-- **Milestone 3, 31 Mar 2027:** audit remediation; multisig and timelock; mainnet; a covered vault live on mainnet, operated by the team; SDK and docs
+- **Milestone 1, 15 Feb 2027:** a real Blend V2 strategy on testnet valued through `b_rate`; loss reporting with pro-rata shortfall accounting and a staker notice period; cover expiry and streaming premium from vault yield; property tests
+- **Milestone 2, 15 Mar 2027:** multiple Blend markets with curator allocation limits; keeper-driven TTL maintenance; USDC vault and pool; STRIDE threat model and monitoring plan; audit engaged
+- **Milestone 3, 15 Apr 2027:** audit remediation; multisig and timelock; mainnet; a covered vault live on mainnet, operated by the team; SDK and docs
 
-Oracle-derived triggers and a DeFindex strategy are specified in the architecture doc but follow mainnet.
+A DeFindex strategy and price-based cover for positions with no accounting signal follow mainnet and are outside this grant.
 
 ## License
 

@@ -225,7 +225,8 @@ Each task ends with `cargo fmt --all`, `cargo clippy --workspace --all-targets -
 - The repo lives at `github.com/0xcatalysis/catalysis-soroban`, created 25 September 2026. It is **private until submission** (founders' decision, 25 September 2026). Push; confirm CI is green, including the WASM build step.
 - **CI runs locally for now** (founders' decision, 25 September 2026): `./scripts/check.sh` runs fmt, clippy, tests and the WASM build. The GitHub workflow is `workflow_dispatch` only.
 - **Architecture document link for the SCF form:** https://0xcatalysis.github.io/catalysis-soroban/ (GitHub Pages, public even while the repo is private; rebuilt by `.github/workflows/pages.yml` on every change to `docs/ARCHITECTURE.md`).
-- **TODO(founders) before hitting submit:** make the repo public and delete the "repository is private" sentence from ARCHITECTURE.md §0, restore the `push` and `pull_request` triggers in `.github/workflows/ci.yml` and confirm a green run, then re-check that the GitHub URL, the architecture doc link and the README links in the SCF form all open in a logged-out browser. `gh repo edit 0xcatalysis/catalysis-soroban --visibility public --accept-visibility-change-consequences`
+- **TODO(founders) before making the repo public:** move internal files out of it (`docs/PLAN.md`, `docs/DECISIONS.md`, and decide on `docs/BACKGROUND.md`), then trim the README's documents table and `CLAUDE.md` to match. The architecture doc (v1.5) no longer points at any of them. Source of this rule: the form answers' pre-submission review, step 3.
+- **TODO(founders) before hitting submit:** make the repo public and change "(private until submission)" in the ARCHITECTURE.md §0 table to nothing, restore the `push` and `pull_request` triggers in `.github/workflows/ci.yml` and confirm a green run, then re-check that the GitHub URL, the architecture doc link and the README links in the SCF form all open in a logged-out browser. `gh repo edit 0xcatalysis/catalysis-soroban --visibility public --accept-visibility-change-consequences`
 - Tag `v0.1.0-mvp`.
 
 ---
@@ -285,8 +286,8 @@ Keep the doc's existing standard: every factual claim sourced, and nothing claim
 
 | Milestone | Scope |
 |---|---|
-| 1 — 31 Jan 2027 | Real Blend V2 strategy on testnet (supply/withdraw via Blend `submit`, value via `b_rate`); loss reporting at strategy level with pro-rata shortfall accounting; staker notice period; cover expiry and streaming premium from vault yield; property tests |
-| 2 — 28 Feb 2027 | Multiple Blend markets with curator allocation limits; open-source keeper for TTL maintenance; USDC vault and pool; STRIDE threat model and monitoring plan; contracts feature-frozen and tagged for audit |
-| 3 — 31 Mar 2027 | Audit remediation; multisig + timelock + `migrate()`; mainnet deployment; a covered vault live on mainnet operated by the team; SDK and docs |
+| 1 — 15 Feb 2027 | Real Blend V2 strategy on testnet (supply/withdraw via Blend `submit`, value via `b_rate`); loss reporting at strategy level with pro-rata shortfall accounting; staker notice period; cover expiry and streaming premium from vault yield; property tests |
+| 2 — 15 Mar 2027 | Multiple Blend markets with curator allocation limits; open-source keeper for TTL maintenance; USDC vault and pool; STRIDE threat model and monitoring plan; contracts feature-frozen and tagged for audit |
+| 3 — 15 Apr 2027 | Audit remediation; multisig + timelock + `migrate()`; mainnet deployment; a covered vault live on mainnet operated by the team; SDK and docs |
 
 **Rule (founders, 25 September 2026): the milestones are a technical roadmap.** The grant checks implementation, not go-to-market. No deliverable or completion test may depend on a partner, an external curator, third-party stake or a customer. A "live vault" means deployed on mainnet and exercised by the team.

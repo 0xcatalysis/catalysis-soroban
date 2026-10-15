@@ -2,8 +2,8 @@
 
 **Covered Vaults for Stellar Markets.** Staked XLM insurance that pays a vault depositor's shortfall inside the withdrawal.
 
-Version 1.5 · 28 September 2026 · Stellar Community Fund #46, Build Award (Open Track)
-Authors: Abhishek Kumar, Dhruv Bodani · Catalyst Labs LLC FZ
+Version 1.6 · 15 October 2026 · Stellar Community Fund #46, Build Award (Open Track)
+Authors: Catalysis core team
 
 ---
 
@@ -48,7 +48,7 @@ We found no live on-ledger protocol on Stellar that pays a vault depositor's cre
 |---|---|---|---|
 | Nexus Mutual (Ethereum) | Members vote, staking the mutual's token ([docs](https://docs.nexusmutual.io/)) | The mutual's pooled capital | Claimant's evidence, assessed by vote |
 | Blend backstop (Stellar) | Nobody: bad debt is auctioned against the backstop, then socialized | BLND:USDC LP shares | Blend's accounting |
-| Catalysis on Ethereum | Nobody: the vault wrapper filed the claim inside the withdrawal | Restaked ETH via EigenLayer and Symbiotic | The vault's accounting |
+| Catalysis on Ethereum | Nobody: the vault wrapper files the claim inside the withdrawal | Restaked ETH via EigenLayer and Symbiotic | The vault's accounting |
 | **This design** | **Nobody: the vault claims inside the withdrawal (5.2)** | **Native XLM staked in a segregated pool (4, 6)** | **The vault's accounting (5.2)** |
 
 This design differs from each on three points: no decision-maker between the loss and the payout; capacity in the network's base asset, which no issuer can freeze and which is not the token of any covered protocol; and full collateralisation enforced on every state change (4.3).
@@ -61,7 +61,7 @@ Each is a property of Stellar or Soroban that changed a decision in the shipped 
 
 **2.1 Issuer flags reach inside contract balances.** An issuer's freeze and clawback rights apply to balances held by a Soroban contract. Capital an issuer can freeze is not capacity. The pool therefore holds native XLM (6).
 
-**2.2 No restaking and no slashable external capital.** On Ethereum our capacity came from restaked ETH and an existing slashing rail. Stellar has neither, so capacity is raised, priced and slashed natively in the CoverPool (4).
+**2.2 No restaking and no slashable external capital.** On Ethereum our capacity comes from restaked ETH and an existing slashing rail. Stellar has neither, so capacity is raised, priced and slashed natively in the CoverPool (4).
 
 **2.3 Footprint limits.** Per-transaction write and footprint limits are network settings. Settlement must never iterate over staker positions, so a claim costs the same number of writes at any pool size (7).
 
@@ -79,30 +79,7 @@ Each is a property of Stellar or Soroban that changed a decision in the shipped 
 
 Two product contracts, CoverPool and CoveredVault, and a strategy interface. MockStrategy implements that interface for tests and the demo.
 
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│ STELLAR / SOROBAN                                                     │
-│                                                                       │
-│                     deposit / withdraw                                │
-│   Depositor ──────────────────────────────►┌──────────────────────┐   │
-│   (paid in full)                           │ (2) CoveredVault     │   │
-│                                            │  shares · principal  │   │
-│        ┌─────────────── allocate ──────────│  idle · strategies   │   │
-│        │                                   └───┬──────────────▲───┘   │
-│        ▼                                       │ buy_cover    │ claim │
-│  ┌──────────────┐  ┌──────────────┐            │ (premium)    │ short-│
-│  │ Strategy A   │  │ Strategy B   │            ▼              │ fall  │
-│  │ (Blend mkt)  │  │ (Blend mkt)  │       ┌──────────────────────┐    │
-│  └──────────────┘  └──────────────┘       │ (1) CoverPool        │    │
-│   test and demo: MockStrategy             │  staked XLM · shares │    │
-│   milestone 1:  Blend V2 strategy         │  premium index       │    │
-│                                           └──────────▲───────────┘    │
-│                                                      │ stake/unstake  │
-│                                           ┌──────────┴───────────┐    │
-│                                           │ Stakers (native XLM) │    │
-│                                           └──────────────────────┘    │
-└───────────────────────────────────────────────────────────────────────┘
-```
+![System overview: depositors and the curator interact with the CoveredVault, which allocates to Blend-market strategies and buys cover from the CoverPool; stakers fund the pool in native XLM and are slashed pro rata when the vault claims a shortfall inside a withdrawal.](assets/system-overview.svg)
 
 Nothing in the payout path leaves the ledger or reads a price.
 
@@ -116,7 +93,7 @@ Nothing in the payout path leaves the ledger or reads a price.
 6. On withdrawal the vault values the depositor's shares, claims the difference between principal and value from the pool in the same transaction, and pays the depositor in full.
 7. The claim lowers the pool's capital, so every staker is slashed pro rata through the share value.
 
-**One contract, not a wrapper.** On Ethereum, Catalysis wrapped a Morpho vault. Stellar has no curated XLM vault to wrap, so the vault and the cover logic are one contract.
+**One contract, not a wrapper.** On Ethereum, Catalysis wraps a Morpho vault. Stellar has no curated XLM vault to wrap, so the vault and the cover logic are one contract.
 
 **Positions are ledger entries, not contract instances.** Soroban's instance storage shares the contract's TTL, so an instance per position would mean a thousand instances to keep alive for a thousand positions. Each position is a persistent entry keyed by address.
 
@@ -199,7 +176,7 @@ fn upgrade(env, wasm_hash: BytesN<32>);              // admin
 
 - **Custody-lock, not allowance.** `stake` moves the asset into the pool's own balance. SEP-41 allowances are spending limits that do not lock funds, so a staker could revoke one when a loss looked likely.
 - **Segregated pools.** A pool insures only the vaults whitelisted on it, so a staker chooses the risk they hold.
-- **Fully collateralised.** Cover written never exceeds capital, and `unstake` refuses any withdrawal that would break that. A claim of `a` reduces capital and cover written by `a` each, so the inequality survives any number of claims in any order. The Ethereum system checked stake against the limit once, at binding.
+- **Fully collateralised.** Cover written never exceeds capital, and `unstake` refuses any withdrawal that would break that. A claim of `a` reduces capital and cover written by `a` each, so the inequality survives any number of claims in any order. The Ethereum system checks stake against the limit once, at binding.
 - **Cover is reserved atomically.** `open_cover` reserves the limit and charges the premium in one call, and fails if capacity is short.
 - **The pool prices its cover.** Premium is `limit × premium_bps / 10,000`, paid upfront by the curator and credited to stakers through the premium index. It is not part of `total_capital` and cannot be slashed.
 - **Partial claims.** Each withdrawal with a shortfall is its own claim against the same cover. `close_cover` releases what is left and keeps the claimed total.
@@ -272,9 +249,13 @@ claimable = shortfall − shortfall × DEDUCTIBLE_BPS / 10,000
 paid      = value + claimable
 ```
 
-`withdraw` runs in this order: value the shares; pull `value` of liquidity, idle first and then strategies in whitelist order; claim `claimable` from the pool; update the books; pay the depositor. `nav` is idle plus what each strategy reports. It is never read from the vault's token balance, so the pool's payout passing through the vault cannot inflate it.
+`withdraw` runs in this order: value the shares; pull `value` of liquidity, idle first and then strategies in whitelist order; claim `claimable` from the pool; update the books; pay the depositor.
 
-**Why at withdrawal.** A strategy loss lowers the vault's net asset value, and the vault's books say what each depositor is short. No price is read. The loss most worth covering is the one where an oracle has already failed, so the payout depends only on accounting. The Ethereum wrapper filed its claim the same way.
+![The withdrawal path: value the shares, pull liquidity, claim the shortfall from the CoverPool, update the books, pay the depositor — all in one transaction. In the worked example the user's shares are worth 90, 10 is claimed from the pool, and the user receives 100.](assets/withdrawal-path.svg)
+
+`nav` is idle plus what each strategy reports. It is never read from the vault's token balance, so the pool's payout passing through the vault cannot inflate it.
+
+**Why at withdrawal.** A strategy loss lowers the vault's net asset value, and the vault's books say what each depositor is short. No price is read. The loss most worth covering is the one where an oracle has already failed, so the payout depends only on accounting. The Ethereum wrapper files its claim the same way.
 
 `DEDUCTIBLE_BPS` is a constant set to zero. It keeps the withdrawal maths in the same shape as the Ethereum wrapper's deductible.
 
@@ -429,4 +410,4 @@ Three milestones, the last one mainnet. Each completion test is something the te
 
 **Track record.** We designed, audited and shipped Catalysis to Ethereum mainnet: vault-native risk coverage over Gauntlet's WETH Prime vault on Morpho, with underwriting capacity from EigenLayer and Symbiotic. Both founders co-authored *Economic Security of Multiple Shared Security Protocols* (Marble 2025, Imperial College Brevan Howard Centre for Financial Analysis).
 
-**Continuity.** Catalysis concludes its Ethereum operations in October 2026. The work continues on Stellar under Catalyst Labs LLC FZ, the contracting entity for this award.
+**Continuity.** Catalysis runs on Ethereum mainnet today, and the Stellar build is where the team's effort now goes: the primitive is proved and audited, and the largest unaddressed version of the problem is on Stellar.

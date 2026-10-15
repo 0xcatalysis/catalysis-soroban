@@ -1,6 +1,5 @@
 # Publishes docs/ARCHITECTURE.md as a GitHub Pages site, so the SCF
 # application has a public link to the technical architecture document.
-# The site is public even while the repository is private (org Team plan).
 name: Pages
 
 on:
@@ -42,6 +41,7 @@ jobs:
           { printf -- '---\nlayout: default\ntitle: Technical Architecture\n---\n\n'; cat docs/ARCHITECTURE.md; } > site/index.md
           mkdir -p site/_includes
           cp docs/assets/favicon.svg docs/assets/favicon-32.png docs/assets/apple-touch-icon.png site/
+          mkdir -p site/assets && cp docs/assets/*.svg docs/assets/*.png site/assets/
           cat > site/_includes/head-custom.html <<'HEAD'
           <link rel="icon" type="image/svg+xml" href="{{ "/favicon.svg" | relative_url }}">
           <link rel="alternate icon" type="image/png" sizes="32x32" href="{{ "/favicon-32.png" | relative_url }}">

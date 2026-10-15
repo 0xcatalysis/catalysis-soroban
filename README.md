@@ -133,7 +133,7 @@ Deployed 25 September 2026.
 ## Development
 
 - `soroban-sdk 28.0.0` is the only dependency. Contracts are `#![no_std]` with `crate-type = ["cdylib", "rlib"]`.
-- Run `./scripts/check.sh` before every commit. It is the same sequence as the CI workflow, which is dispatched manually while the repository is private.
+- Run `./scripts/check.sh` before every commit. It is the same sequence as the CI workflow, which runs on every push and pull request.
 - Conventions (errors, events, upgrades, storage, auth in tests) are in [`CLAUDE.md`](CLAUDE.md). Unit tests register the real pool and strategy contracts through dev-dependencies, which never reach the WASM.
 - Mocks say **TEST AND DEMO ONLY** in their doc comments, here, and in the architecture doc.
 

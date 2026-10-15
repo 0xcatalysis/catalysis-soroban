@@ -17,7 +17,7 @@ This document specifies the contracts, their storage and interfaces, the account
 |---|---|
 | CoverPool, testnet | [`CB3SK2KHIBOKV3WHBMXMJOYQJDSGCXJ6GGFZZN5UZM63K25B5GTBNVIO`](https://stellar.expert/explorer/testnet/contract/CB3SK2KHIBOKV3WHBMXMJOYQJDSGCXJ6GGFZZN5UZM63K25B5GTBNVIO) |
 | CoveredVault, testnet | [`CDMDOL3XKEHHUOCX7M7QRLCBH6AULKHGHGTKIQXOW6HSC7GJKLBAU27A`](https://stellar.expert/explorer/testnet/contract/CDMDOL3XKEHHUOCX7M7QRLCBH6AULKHGHGTKIQXOW6HSC7GJKLBAU27A) |
-| Source, tests, demo script | https://github.com/0xcatalysis/catalysis-soroban (private until submission) |
+| Source, tests, demo script | https://github.com/0xcatalysis/catalysis-soroban |
 | Licence | Apache-2.0 |
 
 The product is contracts, a CLI demo and an SDK (9). There is no user interface in scope.

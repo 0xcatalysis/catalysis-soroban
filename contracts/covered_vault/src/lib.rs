@@ -7,8 +7,8 @@
 //! worth less, the vault claims the shortfall from the CoverPool in the same
 //! transaction and the depositor is paid in full.
 //!
-//! There is no trigger, no oracle and no claims process: the shortfall is the
-//! vault's own accounting. This matches Catalysis on Ethereum, where the
+//! The trigger is automatic: no oracle and no claims process, because the
+//! shortfall is the vault's own accounting. This matches Catalysis on Ethereum, where the
 //! covered vault wrapper files its claim inside the withdrawal.
 
 #![no_std]
@@ -56,7 +56,11 @@ pub struct VaultState {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Position {
     pub shares: i128,
-    /// Cost basis: deposits, reduced pro rata on withdrawal.
+    /// What the depositor is protected for: the value of their shares when
+    /// they were bought (the deposit, less any rounding dust the share price
+    /// could not represent), reduced pro rata on withdrawal. Rounding that
+    /// happens at deposit or withdrawal is never a shortfall, so it is never
+    /// claimed from the pool.
     pub principal: i128,
 }
 
@@ -97,6 +101,10 @@ pub enum Error {
     ZeroShares = 8,
     /// Shares exist but the vault is worth nothing, so they cannot be priced.
     VaultDrained = 9,
+    /// The address does not answer `total_value`, so it cannot be a strategy.
+    StrategyNotResponding = 10,
+    /// The strategy still holds value, so it cannot be removed.
+    StrategyNotEmpty = 11,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +113,12 @@ pub enum Error {
 
 #[contractevent]
 pub struct StrategyAdded {
+    #[topic]
+    pub strategy: Address,
+}
+
+#[contractevent]
+pub struct StrategyRemoved {
     #[topic]
     pub strategy: Address,
 }
@@ -173,15 +187,46 @@ impl CoveredVault {
     // ----- curator ---------------------------------------------------------
 
     /// Whitelists a strategy the curator may allocate to. Admin only.
+    ///
+    /// The address must answer `total_value`: every deposit and withdrawal
+    /// reads NAV across the whole list, so an address that cannot be called
+    /// would block them all.
     pub fn add_strategy(env: Env, strategy: Address) {
         config(&env).admin.require_auth();
         let mut list = strategies(&env);
         if list.contains(&strategy) {
             panic_with_error!(&env, Error::StrategyAlreadyAdded);
         }
+        if StrategyClient::new(&env, &strategy)
+            .try_total_value()
+            .is_err()
+        {
+            panic_with_error!(&env, Error::StrategyNotResponding);
+        }
         list.push_back(strategy.clone());
         env.storage().instance().set(&DataKey::Strategies, &list);
         StrategyAdded { strategy }.publish(&env);
+    }
+
+    /// Removes a strategy from the whitelist. Admin only. The strategy must
+    /// hold nothing, or no longer answer `total_value` at all (in which case
+    /// it is blocking every deposit and withdrawal and has no value to lose).
+    pub fn remove_strategy(env: Env, strategy: Address) {
+        config(&env).admin.require_auth();
+        let list = strategies(&env);
+        let index = match list.first_index_of(&strategy) {
+            Some(i) => i,
+            None => panic_with_error!(&env, Error::StrategyNotWhitelisted),
+        };
+        if let Ok(Ok(value)) = StrategyClient::new(&env, &strategy).try_total_value() {
+            if value != 0 {
+                panic_with_error!(&env, Error::StrategyNotEmpty);
+            }
+        }
+        let mut list = list;
+        list.remove(index);
+        env.storage().instance().set(&DataKey::Strategies, &list);
+        StrategyRemoved { strategy }.publish(&env);
     }
 
     /// Buys `limit` of cover for this vault from the CoverPool. The admin
@@ -268,9 +313,18 @@ impl CoveredVault {
             &amount,
         );
 
+        // Protect what the shares are worth, not what was paid: the share
+        // price cannot represent every stroop, and the dust the floor leaves
+        // behind belongs to the vault. Counting it as principal would make it
+        // a "shortfall" the pool pays. For the first deposit this is `amount`.
         let mut pos = position(&env, &from);
+        let bought = if st.total_shares == 0 {
+            amount
+        } else {
+            shares * (nav(&env, &st) + amount) / (st.total_shares + shares) // rounds down
+        };
         pos.shares += shares;
-        pos.principal += amount;
+        pos.principal += bought;
         st.total_shares += shares;
         st.idle += amount;
 
@@ -335,9 +389,12 @@ impl CoveredVault {
                 .claim(&env.current_contract_address(), &claimable);
         }
 
-        // 4. Update the books, then pay.
+        // 4. Update the books, then pay. The principal that stays behind is
+        //    the floor of its pro-rata share, so it can never exceed what the
+        //    remaining shares are worth; the stroop between the two roundings
+        //    is forfeited, not claimed.
+        pos.principal = pos.principal * (pos.shares - shares) / pos.shares; // rounds down
         pos.shares -= shares;
-        pos.principal -= protected;
         st.total_shares -= shares;
         save_position(&env, &from, &pos);
         save_state(&env, &st);

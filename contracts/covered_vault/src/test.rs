@@ -4,7 +4,7 @@ use super::*;
 use cover_pool::{CoverPool, CoverPoolClient as PoolClient};
 use mock_strategy::{MockStrategy, MockStrategyClient};
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{storage::Persistent as _, Address as _},
     token::{StellarAssetClient, TokenClient},
     Address, Env,
 };
@@ -176,7 +176,10 @@ fn withdraw_checked(w: &World, who: &Address, shares: i128) -> i128 {
     assert_eq!(claimed(w) - claimed_before, (protected - value).max(0));
     let after = w.vault.position(who);
     assert_eq!(after.shares, before.shares - shares);
-    assert_eq!(after.principal, before.principal - protected);
+    assert_eq!(
+        after.principal,
+        before.principal * (before.shares - shares) / before.shares
+    );
     paid
 }
 
@@ -271,6 +274,62 @@ fn allocate_rejects_unknown_strategies() {
     let user = funded(&w, 100 * XLM);
     w.vault.deposit(&user, &(100 * XLM));
     w.vault.allocate(&Address::generate(&w.env), &(10 * XLM));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #10)")]
+fn add_strategy_rejects_an_address_that_cannot_report_its_value() {
+    // One address that cannot answer `total_value` would block every
+    // deposit and withdrawal, since NAV reads the whole list.
+    let w = world();
+    w.vault.add_strategy(&Address::generate(&w.env));
+}
+
+#[test]
+fn remove_strategy_takes_an_empty_strategy_off_the_list() {
+    let w = world();
+    let user = demo_allocated(&w);
+    assert_eq!(w.vault.strategies().len(), 2);
+
+    // Market B still holds 50: it cannot go.
+    assert!(w.vault.try_remove_strategy(&w.market_b.address).is_err());
+
+    // Emptied by a full withdrawal, it can.
+    w.vault.withdraw(&user, &(100 * XLM));
+    assert_eq!(w.market_b.total_value(), 0);
+    w.vault.remove_strategy(&w.market_b.address);
+    assert_eq!(
+        w.vault.strategies(),
+        soroban_sdk::vec![&w.env, w.market_a.address.clone()]
+    );
+
+    // Gone from the whitelist, it cannot be allocated to.
+    let user = deposit(&w, 10 * XLM);
+    assert!(w.vault.try_allocate(&w.market_b.address, &XLM).is_err());
+    w.vault.allocate(&w.market_a.address, &XLM);
+    assert_eq!(w.vault.withdraw(&user, &(10 * XLM)), 10 * XLM);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn remove_strategy_rejects_an_unknown_address() {
+    let w = world();
+    w.vault.remove_strategy(&Address::generate(&w.env));
+}
+
+#[test]
+fn bump_position_extends_a_live_entry_and_ignores_a_missing_one() {
+    let w = world();
+    let user = deposit(&w, 10 * XLM);
+    w.vault.bump_position(&user);
+    w.vault.bump_position(&Address::generate(&w.env));
+    let ttl = w.env.as_contract(&w.vault.address, || {
+        w.env
+            .storage()
+            .persistent()
+            .get_ttl(&DataKey::Position(user.clone()))
+    });
+    assert!(ttl >= TTL_EXTEND_TO);
 }
 
 #[test]
@@ -721,21 +780,105 @@ fn ann_in_profit_then_bob<'a>(w: &World<'a>) -> (Address, Address) {
 
 #[test]
 fn rounding_at_a_fractional_share_price_never_creates_a_claim() {
+    for bob_first in [false, true] {
+        let w = world();
+        let (ann, bob) = ann_in_profit_then_bob(&w);
+
+        // Bob paid 1,000 XLM for shares worth 999.9999999: the stroop the
+        // share price could not represent stays in the vault and is not
+        // part of his principal, so he carries no shortfall.
+        assert_eq!(
+            w.vault.position(&bob),
+            view(7_142_857_142, 9_999_999_999, 9_999_999_999, 0)
+        );
+
+        if bob_first {
+            assert_eq!(w.vault.withdraw(&bob, &7_142_857_142), 9_999_999_999);
+            assert_eq!(claimed(&w), 0);
+            // Ann, now alone, gets the whole remaining NAV, dust included.
+            assert_eq!(w.vault.withdraw(&ann, &(1_000 * XLM)), 14_000_000_001);
+        } else {
+            assert_eq!(w.vault.withdraw(&ann, &(1_000 * XLM)), 1_400 * XLM);
+            assert_eq!(claimed(&w), 0);
+            assert_eq!(w.vault.nav(), 1_000 * XLM);
+            assert_eq!(
+                w.vault.position(&bob),
+                view(7_142_857_142, 1_000 * XLM, 9_999_999_999, 0)
+            );
+            assert_eq!(w.vault.withdraw(&bob, &7_142_857_142), 1_000 * XLM);
+        }
+        assert_eq!(claimed(&w), 0);
+        assert_eq!(w.vault.nav(), 0);
+    }
+}
+
+#[test]
+fn a_depositor_who_lost_nothing_can_leave_a_vault_with_no_cover() {
+    // Same entry rounding as above, but the vault has no cover at all. A
+    // claim of even one stroop would fail with NoCover and block the exit.
     let w = world();
-    let (ann, bob) = ann_in_profit_then_bob(&w);
+    let ann = deposit(&w, 1_000 * XLM);
+    allocate_all(&w);
+    donate(&w, &w.market_a, 400 * XLM);
+    let bob = funded(&w, 1_000 * XLM);
+    w.vault.deposit(&bob, &(1_000 * XLM));
+    assert_eq!(remaining(&w), 0);
 
-    assert_eq!(w.vault.withdraw(&ann, &(1_000 * XLM)), 1_400 * XLM);
+    assert_eq!(w.vault.withdraw(&bob, &7_142_857_142), 9_999_999_999);
     assert_eq!(claimed(&w), 0);
-    assert_eq!(w.vault.nav(), 1_000 * XLM);
+    assert_eq!(w.vault.withdraw(&ann, &(1_000 * XLM)), 14_000_000_001);
+    assert_eq!(w.vault.nav(), 0);
+}
 
-    // Bob's shares are worth exactly his principal, to the stroop.
-    assert_eq!(
-        w.vault.position(&bob),
-        view(7_142_857_142, 1_000 * XLM, 1_000 * XLM, 0)
-    );
-    assert_eq!(w.vault.withdraw(&bob, &7_142_857_142), 1_000 * XLM);
+#[test]
+fn partial_withdrawals_at_an_awkward_price_never_claim_without_a_loss() {
+    // Floors at deposit and at every partial withdrawal leave dust in the
+    // vault; none of it may ever reach the pool. Cover is open, so a
+    // spurious claim would succeed silently and show up in `claimed`.
+    let w = world();
+    buy_cover(&w, 100 * XLM);
+    let ann = deposit(&w, 47);
+    allocate_all(&w);
+    donate(&w, &w.market_a, 13); // 47 shares now worth 60: 1.276 per share
+    let bob = funded(&w, 30);
+    assert_eq!(w.vault.deposit(&bob, &30), 23); // 23.5 rounds down
+    assert_eq!(w.vault.position(&bob), view(23, 29, 29, 0)); // 29.57 -> 29
+    for chunk in [17, 1, 2, 3] {
+        w.vault.withdraw(&bob, &chunk);
+        assert_eq!(claimed(&w), 0);
+    }
+    assert_eq!(w.vault.position(&bob), view(0, 0, 0, 0));
+    w.vault.withdraw(&ann, &47);
     assert_eq!(claimed(&w), 0);
     assert_eq!(w.vault.nav(), 0);
+    // Everything in came out: 47 + 13 + 30, split between the two.
+    assert_eq!(w.token.balance(&ann) + w.token.balance(&bob), 90);
+}
+
+#[test]
+fn inflating_the_share_price_cannot_turn_entry_rounding_into_a_claim() {
+    // A depositor with two accounts: the first buys one share and donates
+    // 100 XLM straight to a strategy, so one share is now worth 100 XLM
+    // and a second deposit of 200 XLM + 1 stroop also buys one share. If
+    // the second account's principal were what it paid, its share would
+    // be worth 50 XLM less than that as soon as the first account left,
+    // and the pool would pay the difference with no loss anywhere.
+    let w = world();
+    w.vault.buy_cover(&(50 * XLM));
+    let a1 = funded(&w, 100 * XLM + 1);
+    let a2 = funded(&w, 200 * XLM + 1);
+    w.vault.deposit(&a1, &1);
+    w.token.transfer(&a1, &w.market_a.address, &(100 * XLM));
+    assert_eq!(w.vault.nav(), 100 * XLM + 1);
+    assert_eq!(w.vault.deposit(&a2, &(200 * XLM + 1)), 1);
+    // The share bought is worth half the vault: that is the principal.
+    assert_eq!(w.vault.position(&a2).principal, 150 * XLM + 1);
+
+    w.vault.withdraw(&a1, &1);
+    assert_eq!(w.vault.withdraw(&a2, &1), 150 * XLM + 1);
+    assert_eq!(claimed(&w), 0);
+    assert_eq!(remaining(&w), 50 * XLM);
+    assert_eq!(w.token.balance(&a1) + w.token.balance(&a2), 300 * XLM + 2);
 }
 
 #[test]
@@ -751,10 +894,10 @@ fn a_loss_can_leave_one_depositor_in_profit_and_insure_the_other() {
 
     assert_eq!(
         w.vault.position(&bob),
-        view(7_142_857_142, 750 * XLM, 1_000 * XLM, 250 * XLM)
+        view(7_142_857_142, 750 * XLM, 9_999_999_999, 2_499_999_999)
     );
-    assert_eq!(w.vault.withdraw(&bob, &7_142_857_142), 1_000 * XLM);
-    assert_eq!(claimed(&w), 250 * XLM);
+    assert_eq!(w.vault.withdraw(&bob, &7_142_857_142), 9_999_999_999);
+    assert_eq!(claimed(&w), 2_499_999_999);
 
     // The vault's 1,800 went to the two of them (1,050 + 750); the pool
     // paid the rest.
@@ -1050,7 +1193,7 @@ fn deposit_that_would_mint_no_shares_is_rejected() {
 }
 
 #[test]
-fn late_depositor_rounding_still_pays_every_stroop_of_principal() {
+fn late_depositor_is_protected_for_what_their_shares_bought() {
     let w = world();
     buy_cover(&w, 500 * XLM);
     let ann = deposit(&w, 10);
@@ -1058,23 +1201,26 @@ fn late_depositor_rounding_still_pays_every_stroop_of_principal() {
     assert_eq!(w.market_a.simulate_loss(&3_000), 3);
     assert_eq!(w.vault.nav(), 7);
 
-    // 5 stroops at 0.7 per share: 7.14 rounds down to 7 shares.
+    // 5 stroops at 0.7 per share: 7.14 rounds down to 7 shares, worth 4.
+    // The fifth stroop is dust the share price cannot represent; it stays
+    // in the vault and is not Bob's to claim.
     let bob = funded(&w, 5);
     assert_eq!(w.vault.deposit(&bob, &5), 7);
     assert_eq!(w.vault.state().total_shares, 17);
     assert_eq!(w.vault.nav(), 12);
-    assert_eq!(w.vault.position(&bob), view(7, 4, 5, 1));
+    assert_eq!(w.vault.position(&bob), view(7, 4, 4, 0));
     assert_eq!(w.vault.position(&ann), view(10, 7, 10, 3));
 
-    assert_eq!(w.vault.withdraw(&bob, &7), 5);
-    assert_eq!(claimed(&w), 1);
+    assert_eq!(w.vault.withdraw(&bob, &7), 4);
+    assert_eq!(claimed(&w), 0);
     assert_eq!(w.vault.nav(), 8);
     assert_eq!(w.vault.state().total_shares, 10);
 
+    // Bob's stroop raised the NAV, so Ann's shortfall is 2, not 3.
     assert_eq!(w.vault.withdraw(&ann, &10), 10);
-    assert_eq!(claimed(&w), 3);
+    assert_eq!(claimed(&w), 2);
     assert_eq!(w.vault.nav(), 0);
-    assert_eq!(w.token.balance(&bob), 5);
+    assert_eq!(w.token.balance(&bob), 4);
     assert_eq!(w.token.balance(&ann), 10);
 }
 
@@ -1098,16 +1244,18 @@ fn withdrawal_that_would_pay_nothing_is_rejected() {
     );
     assert_eq!(w.vault.position(&user), view(2_250, 1_800, 2_000, 200));
 
-    // Seven shares: worth 5.6 -> 5, protected 6.22 -> 6.
+    // Seven shares: worth 5.6 -> 5, protected 6.22 -> 6. The principal
+    // left behind is 2,000 * 2,243 / 2,250 = 1,993.8 -> 1,993: the stroop
+    // between the two roundings is forfeited rather than claimed later.
     assert_eq!(w.vault.withdraw(&user, &7), 6);
     assert_eq!(claimed(&w), 1);
     assert_eq!(w.vault.position(&user).shares, 2_243);
-    assert_eq!(w.vault.position(&user).principal, 1_994);
+    assert_eq!(w.vault.position(&user).principal, 1_993);
     assert_eq!(w.vault.nav(), 1_795);
 
-    assert_eq!(w.vault.withdraw(&user, &2_243), 1_994);
-    assert_eq!(claimed(&w), 200);
-    assert_eq!(w.token.balance(&user), 2_000);
+    assert_eq!(w.vault.withdraw(&user, &2_243), 1_993);
+    assert_eq!(claimed(&w), 199);
+    assert_eq!(w.token.balance(&user), 1_999);
     assert_eq!(w.vault.nav(), 0);
 }
 
@@ -1217,4 +1365,68 @@ fn books_balance_through_a_scripted_life_of_the_vault() {
     assert_eq!(w.token.balance(&p), 1_000 * XLM);
     assert_eq!(w.token.balance(&q), 500 * XLM);
     assert_eq!(w.token.balance(&r), 440 * XLM);
+}
+
+/// Without a loss there is never a claim, whatever the order and size of
+/// deposits, yield and partial withdrawals. A fixed-seed linear congruential
+/// generator drives 400 operations across four depositors at prices that
+/// drift away from 1 and never divide evenly.
+#[test]
+fn without_a_loss_there_is_never_a_claim_whatever_the_sequence() {
+    let w = world();
+    buy_cover(&w, 100 * XLM);
+    let users: [Address; 4] = core::array::from_fn(|_| funded(&w, 1_000_000));
+    let mut seed: u64 = 0x5eed_c0ffee;
+    let mut next = |bound: u64| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (seed >> 33) % bound
+    };
+
+    for _ in 0..400 {
+        let who = &users[next(4) as usize];
+        let held = w.vault.position(who).shares;
+        match next(10) {
+            0..=3 => {
+                let amount = 1 + next(5_000) as i128;
+                if w.vault.try_deposit(who, &amount).is_ok() {
+                    // Keep most of it working so the price keeps moving.
+                    let idle = w.vault.state().idle;
+                    if idle > 1 {
+                        w.vault.allocate(&w.market_a.address, &(idle / 2));
+                    }
+                }
+            }
+            4..=5 => donate(&w, &w.market_a, 1 + next(300) as i128),
+            _ if held > 0 => {
+                let shares = 1 + next(held as u64) as i128;
+                // The only acceptable failure is dust that pays nothing.
+                if let Err(e) = w.vault.try_withdraw(who, &shares) {
+                    assert_eq!(
+                        e,
+                        Ok(soroban_sdk::Error::from_contract_error(
+                            Error::InvalidAmount as u32
+                        ))
+                    );
+                }
+            }
+            _ => {}
+        }
+        assert_eq!(claimed(&w), 0, "a claim with no loss");
+        for u in &users {
+            let p = w.vault.position(u);
+            assert!(p.principal <= p.value, "{p:?}");
+        }
+    }
+
+    // Everyone can leave in full, still without a claim.
+    for u in &users {
+        let held = w.vault.position(u).shares;
+        if held > 0 {
+            w.vault.withdraw(u, &held);
+        }
+    }
+    assert_eq!(claimed(&w), 0);
+    assert_eq!(w.vault.state().total_shares, 0);
 }

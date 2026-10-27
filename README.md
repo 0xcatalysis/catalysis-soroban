@@ -14,7 +14,7 @@ This is the Soroban implementation of [Catalysis](https://catalysis.network), wh
 | [`docs/PLAN.md`](docs/PLAN.md) | The build plan, the founders' fixed decisions, the task log and the known-limitations list |
 | [`CLAUDE.md`](CLAUDE.md) | Rules and conventions for anyone (or any agent) working in this repo |
 
-> **Status: pre-grant MVP.** The happy path runs end to end in 83 tests and on Stellar testnet. The extensions scheduled for the grant milestones are listed in [Scope](#scope). The code is not audited. Do not use it with real funds.
+> **Status: pre-grant MVP.** The happy path runs end to end in 91 tests and on Stellar testnet. The extensions scheduled for the grant milestones are listed in [Scope](#scope). The code is not audited. Do not use it with real funds.
 
 ## How it works
 
@@ -45,7 +45,7 @@ The demo scenario, which is also the integration test and the testnet script:
 | Contract | Role |
 |---|---|
 | [`cover_pool`](contracts/cover_pool/src/lib.rs) | Staked capital. Mints shares, reserves cover for whitelisted vaults, prices and distributes premium through a per-share accumulator, and pays claims by lowering the share value, so every staker is slashed pro rata in a constant number of writes. A vault can claim many times against one cover. Fully collateralised: cover written never exceeds capital, and capital backing live cover cannot be unstaked. |
-| [`covered_vault`](contracts/covered_vault/src/lib.rs) | The vault. Internal non-transferable shares and per-depositor principal. The curator whitelists strategies, allocates idle XLM to them and buys cover. `withdraw` values the shares, pulls liquidity, claims any shortfall against principal from the pool, and pays the depositor in full. A deductible constant exists and is zero. |
+| [`covered_vault`](contracts/covered_vault/src/lib.rs) | The vault. Internal non-transferable shares and per-depositor principal (what the shares were worth when bought, so rounding is never claimed). The curator whitelists strategies, allocates idle XLM to them and buys cover. `withdraw` values the shares, pulls liquidity, claims any shortfall against principal from the pool, and pays the depositor in full. A deductible constant exists and is zero. |
 | [`mock_strategy`](contracts/mock_strategy/src/lib.rs) | **Test and demo only.** Stands in for a Blend market. Holds real XLM so a simulated loss really moves tokens out. `simulate_loss(bps)` is admin-only. Milestone 1 replaces it with a strategy that supplies to a real Blend V2 pool. |
 | [`common`](contracts/common/src/lib.rs) | Cross-contract interfaces (the pool and strategies as the vault sees them) and the Blend V2 types, mirrored field for field from `blend-capital/blend-contracts-v2`, for the milestone-1 Blend strategy. |
 
@@ -102,7 +102,7 @@ Needs Rust stable with the `wasm32v1-none` target and the [Stellar CLI](https://
 | Crate | Tests | What they cover |
 |---|---|---|
 | `cover_pool` | 34 | Staking, the lock, capacity, premium split and conservation, partial and sequential claims, two vaults sharing a pool, stakers leaving between claims, rounding, invariants |
-| `covered_vault` | 39 | Share pricing, NAV, the demo scenario, partial and total losses, multiple depositors at different entry prices, sequential losses, interleaved withdrawals, cover exhaustion, rounding, invariants |
+| `covered_vault` | 47 | Share pricing, NAV, the demo scenario, partial and total losses, multiple depositors at different entry prices, sequential losses, interleaved withdrawals, cover exhaustion, rounding, invariants, a 400-operation sequence with no loss and no claim |
 | `mock_strategy` | 8 | Value, withdrawal, simulated loss, bounds, authorization |
 | `integration-tests` | 2 | [`covered_vault_demo.rs`](integration-tests/tests/covered_vault_demo.rs): the six steps above with every number asserted and every balance reconciled, plus the quiet path with no loss |
 
@@ -133,7 +133,7 @@ Deployed 25 September 2026.
 ## Development
 
 - `soroban-sdk 28.0.0` is the only dependency. Contracts are `#![no_std]` with `crate-type = ["cdylib", "rlib"]`.
-- Run `./scripts/check.sh` before every commit. It is the same sequence as the CI workflow, which runs on every push and pull request.
+- Run `./scripts/check.sh` before every commit. It is the same sequence as the CI workflow, which runs on every push to `main` and every pull request.
 - Conventions (errors, events, upgrades, storage, auth in tests) are in [`CLAUDE.md`](CLAUDE.md). Unit tests register the real pool and strategy contracts through dev-dependencies, which never reach the WASM.
 - Mocks say **TEST AND DEMO ONLY** in their doc comments, here, and in the architecture doc.
 

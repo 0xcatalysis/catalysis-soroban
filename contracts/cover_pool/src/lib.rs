@@ -374,8 +374,8 @@ impl CoverPool {
 
     /// Pays `amount` of the vault's remaining cover to the vault. This is the
     /// slashing moment: capital leaves the pool and every staker's share
-    /// value falls pro rata. Three writes regardless of staker count: pool
-    /// state, the cover entry, and the token balances. Returns the amount.
+    /// value falls pro rata. Four writes regardless of staker count: pool
+    /// state, the cover entry, and the two token balances. Returns the amount.
     pub fn claim(env: Env, vault: Address, amount: i128) -> i128 {
         require_vault(&env, &vault);
         if amount <= 0 {

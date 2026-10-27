@@ -2,7 +2,7 @@
 
 **Covered Vaults for Stellar Markets.** Staked XLM insurance that pays a vault depositor's shortfall inside the withdrawal.
 
-Version 1.6 · 15 October 2026 · Stellar Community Fund #46, Build Award (Open Track)
+Version 1.7 · 27 October 2026 · Stellar Community Fund #46, Build Award (Open Track)
 Authors: Catalysis core team
 
 ---
@@ -11,7 +11,7 @@ Authors: Catalysis core team
 
 This document specifies the contracts, their storage and interfaces, the accounting, the security model and the milestones to mainnet. It describes what the code does today. Milestone work is marked as such.
 
-**Status.** CoverPool and CoveredVault are written in Rust, covered by 83 passing tests, and deployed to Stellar testnet. The scenario in 5.3 has run end to end against the deployed contracts. A mock strategy stands in for a Blend market; it is for tests and the demo only, and milestone 1 replaces it.
+**Status.** CoverPool and CoveredVault are written in Rust, covered by 91 passing tests, and deployed to Stellar testnet. The scenario in 5.3 has run end to end against the deployed contracts. A mock strategy stands in for a Blend market; it is for tests and the demo only, and milestone 1 replaces it.
 
 | | |
 |---|---|
@@ -87,7 +87,7 @@ Nothing in the payout path leaves the ledger or reads a price.
 
 1. Stakers stake XLM into the CoverPool and receive shares under a lock.
 2. The vault's curator buys cover. The pool reserves the limit and charges a premium, which goes to the stakers.
-3. Depositors put XLM into the vault and receive shares. The vault records each depositor's principal.
+3. Depositors put XLM into the vault and receive shares. The vault records each depositor's principal: what their shares were worth when bought.
 4. The curator allocates idle XLM to whitelisted strategies.
 5. If a strategy loses money, the vault's net asset value falls.
 6. On withdrawal the vault values the depositor's shares, claims the difference between principal and value from the pool in the same transaction, and pays the depositor in full.
@@ -215,14 +215,15 @@ pub struct VaultState {
 #[contracttype]
 pub struct Position {             // one persistent entry per depositor
     pub shares: i128,
-    pub principal: i128,           // cost basis: deposits, reduced pro rata on withdrawal
+    pub principal: i128,           // what the shares were worth when bought; reduced pro rata on withdrawal
 }
 
 // strategies: Vec<Address>, instance storage; the curator's whitelist
 pub const DEDUCTIBLE_BPS: i128 = 0;   // share of a shortfall the depositor bears
 
 // curator
-fn add_strategy(env, strategy: Address);
+fn add_strategy(env, strategy: Address);          // must answer total_value
+fn remove_strategy(env, strategy: Address);       // only when it holds nothing, or no longer answers
 fn buy_cover(env, limit: i128) -> i128;           // curator pays the premium
 fn close_cover(env);
 fn allocate(env, strategy: Address, amount: i128); // idle -> strategy
@@ -238,6 +239,8 @@ fn strategies(env) -> Vec<Address>;
 ```
 
 Shares are internal and non-transferable, which keeps per-address principal correct. A depositor who arrives after a loss buys shares at the lower net asset value, so their principal equals their value and they carry no shortfall.
+
+**Principal is what the shares bought, not what was paid.** Share minting rounds down, so a deposit at a share price other than 1 pays for a fraction of a share it does not receive. That dust stays in the vault. Recording the full deposit as principal would turn it into a "shortfall" that the pool pays with no loss anywhere, and would let a depositor who was never under water be blocked from leaving a vault with no cover. So `deposit` credits `shares × nav_after / total_shares_after`, rounded down; for the first deposit this is the deposit itself. A partial withdrawal leaves behind `principal × remaining_shares / shares`, rounded down, so the principal that stays can never exceed what the remaining shares are worth. Rounding is therefore never claimed: without a strategy loss there is no claim, in any sequence of deposits, yield and withdrawals, and the test suite drives 400 such operations to check it.
 
 ### 5.2 The payout rule
 
@@ -326,7 +329,7 @@ pub fn claim(env: Env, vault: Address, amount: i128) -> i128 {
 }
 ```
 
-Four writes: the cover entry, the pool state, and the two balances the transfer touches. Blend socializes losses the same way, by moving `b_rate` instead of touching balances.
+Four writes: the cover entry, the pool state, and the two balances the transfer touches. (The listing omits the zero-amount and no-cover checks and the `Slashed` event the function also has.) Blend socializes losses the same way, by moving `b_rate` instead of touching balances.
 
 Two alternatives were rejected. Epoch lists make a dormant staker walk every loss since they joined. A loss-per-share accumulator with share burning makes each holder's realized loss depend on when the others interacted.
 
@@ -340,14 +343,16 @@ Staking mints `amount × total_shares / total_capital`; unstaking pays `shares �
 
 ### 8.1 Testing
 
-Unit tests run every contract function against the real neighbouring contracts. The worked example in 5.3 runs end to end with every number and every balance asserted. Scenarios were derived from the test suites of the audited Ethereum implementation and recomputed for this design: depositors at different entry prices, sequential losses, interleaved partial withdrawals, cover exhaustion, stakers joining and leaving between claims, premium conservation, and rounding at the stroop level. Scripted sequences check the invariants in 4.3 after every step. `scripts/check.sh` runs formatting, lints, tests and the Wasm build, and CI runs the same steps.
+Unit tests run every contract function except `upgrade` against the real neighbouring contracts. The worked example in 5.3 runs end to end with every number and every balance asserted. Scenarios were derived from the test suites of the audited Ethereum implementation and recomputed for this design: depositors at different entry prices, sequential losses, interleaved partial withdrawals, cover exhaustion, stakers joining and leaving between claims, premium conservation, and rounding at the stroop level. Scripted sequences check the invariants in 4.3 after every step. `scripts/check.sh` runs formatting, lints, tests and the Wasm build, and CI runs the same steps.
 
 ### 8.2 Admin authority
 
 | Admin | Can | Cannot |
 |---|---|---|
 | Pool admin | Whitelist vaults; upgrade the pool | Alter a vault's cover; redirect or block a claim; withdraw staked capital; change share value except through a claim |
-| Vault admin (curator) | Whitelist strategies; allocate idle deposits to them; buy and close cover; upgrade the vault | Touch a depositor's principal or shares; block a withdrawal; move deposits anywhere except a whitelisted strategy |
+| Vault admin (curator) | Whitelist strategies that answer `total_value`, and remove one that holds nothing; allocate idle deposits to them; buy and close cover; upgrade the vault | Touch a depositor's principal or shares; move deposits anywhere except a whitelisted strategy |
+
+The curator is trusted: with the whitelist and `upgrade` in one key, a dishonest curator can move deposits. What the design removes is the honest mistake. Every deposit and withdrawal reads NAV across the whole strategy list, so a strategy that cannot be called would block them all; `add_strategy` refuses an address that does not answer `total_value`, and `remove_strategy` takes a strategy off the list once it holds nothing, or if it has stopped answering.
 
 Depositors trust the curator's choice of strategies, as depositors in a Morpho vault do. Milestone 2 adds per-strategy allocation limits. The premium rate and the lock are fixed at deployment. Upgrade authority moves behind a multisig with a timelock in milestone 3.
 
@@ -365,7 +370,7 @@ The Soroban contracts are audited before mainnet using SCF audit credits, agains
 | Stakers are slashed when a depositor withdraws, not when the loss occurs, so excess capital can leave in between. Capital backing cover cannot. | Milestone 1: loss reporting, notice period |
 | Premium is paid upfront by the curator. Cover has no expiry. | Milestone 1 |
 | Withdrawals drain strategies in whitelist order. No allocation limits. | Milestone 2 |
-| Zero-share mints are rejected, but there is no virtual share offset against donation-based share inflation. | Before audit |
+| Zero-share mints are rejected, and rounding is never claimed from the pool, but there is no virtual share offset: a donation that inflates the share price still costs a later depositor the fraction of a share it could not buy. | Before audit |
 | A vault with zero NAV or a pool slashed to zero rejects new deposits. | Redeploy |
 | Each admin can upgrade its contract. | Milestone 3: multisig, timelock |
 
